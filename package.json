@@ -1,0 +1,44 @@
+{
+  "scripts": {
+    "lint": "./node_modules/.bin/solhint -f table contracts/**/**/*.sol contracts/**/*.sol",
+    "lint:fix": "./node_modules/.bin/prettier --write contracts/**/**/*.sol contracts/**/*.sol",
+    "prepare": "husky install",
+    "compile": "hardhat compile",
+    "test": "POLYGON_NETWORK=hardhat AUTO_MINING_ON=true hardhat test",
+    "coverage": "hardhat coverage && open coverage/index.html",
+    "local": "hardhat node",
+    "local:ipv4": "hardhat node --hostname 127.0.0.1"
+  },
+  "dependencies": {
+    "@bundlr-network/client": "^0.5.10",
+    "@nomiclabs/hardhat-ethers": "^2.0.2",
+    "@nomiclabs/hardhat-waffle": "^2.0.1",
+    "@openzeppelin/contracts": "^4.6.0",
+    "@openzeppelin/contracts-upgradeable": "^4.6.0",
+    "@openzeppelin/hardhat-upgrades": "^1.12.0",
+    "@rari-capital/solmate": "^6.2.0",
+    "abi-decoder": "^2.4.0",
+    "axios": "^0.25.0",
+    "chai": "^4.3.4",
+    "commander": "^8.3.0",
+    "dotenv": "^10.0.0",
+    "ethereum-waffle": "^3.4.0",
+    "ethers": "^5.4.7",
+    "hardhat": "^2.6.4",
+    "image-data-uri": "^2.0.1",
+    "ipfs-http-client": "^52.0.5",
+    "lodash": "^4.17.21",
+    "yargs": "^17.3.1"
+  },
+  "devDependencies": {
+    "@nomiclabs/hardhat-solhint": "^2.0.0",
+    "hardhat-contract-sizer": "^2.1.1",
+    "husky": "^7.0.4",
+    "open": "^8.4.0",
+    "prettier": "^2.4.1",
+    "prettier-plugin-solidity": "^1.0.0-beta.19",
+    "solhint": "^3.3.6",
+    "solhint-plugin-prettier": "^0.0.5",
+    "solidity-coverage": "^0.7.17"
+  }
+}
