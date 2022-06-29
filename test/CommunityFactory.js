@@ -5,6 +5,8 @@ const {
     factorySetupCommunityWithRegisteredTM, 
     factorySetupCommunityWithClone,
     factorySetupCommunityWithRegisteredClone,
+    deployCommunityFactory2,
+    deployGlobalBasicTokenManager,
     COMMUNITY_DEPLOYED_TOPIC_HASH,
     TOKEN_MANAGER_DEPLOYED_TOPIC_HASH
 } = require("../utils/test-utils");
@@ -50,15 +52,16 @@ describe("CommunityFactory", function () {
         await beacon.deployed();  
         const minimalForwarder = await MinimalForwarder.deploy();
         await minimalForwarder.deployed();
-        factory = await CommunityFactory.deploy(
-            proxyAdminOwner.address,
+        factory = await deployCommunityFactory2(
+            proxyAdminOwner.address, 
             minimalForwarder.address,
             minimalForwarder.address,
             highlight.address,
             permissionsRegistryAdmin.address,
-            vault.address
+            vault.address,
+            [(await deployGlobalBasicTokenManager()).address],
+            highlightBeaconAdmin.address
         );
-        await factory.deployed();
     });
 
     beforeEach(async function () {

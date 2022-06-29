@@ -3,17 +3,21 @@
 pragma solidity 0.8.10;
 
 import "./IPermissionsRegistry.sol";
+import "../utils/EnumerableSetUpgradeable.sol";
 import "../utils/OwnableUpgradeable.sol";
 import "../utils/ERC165/ERC165Upgradeable.sol";
 
 /**
  * @title Highlight permissions registry
  * @author ishan@highlight.xyz
+ * @author sarib@highlight.xyz
  * @dev Allows for O(1) swapping of the platform executor.
  */
 contract PermissionsRegistry is IPermissionsRegistry, OwnableUpgradeable, ERC165Upgradeable {
+    using EnumerableSetUpgradeable for EnumerableSetUpgradeable.AddressSet;
+
     /**
-     * @dev Flexible platform transaction executor
+     * @dev (Deprecated)
      */
     address public platformExecutor;
 
@@ -23,37 +27,84 @@ contract PermissionsRegistry is IPermissionsRegistry, OwnableUpgradeable, ERC165
     address public platformVault;
 
     /**
-     * @notice Initialize the registry with the platform executorn and the platform vault
+     * @dev Whitelisted currencies for system
+     */
+    EnumerableSetUpgradeable.AddressSet internal _whitelistedCurrencies;
+
+    /**
+     * @dev Platform transaction executors
+     */
+    EnumerableSetUpgradeable.AddressSet internal _platformExecutors;
+
+    /**
+     * @notice Initialize the registry with an initial platform executor and the platform vault
      */
     function initialize(address _initialExecutor, address _platformVault) external initializer {
         __Ownable_init();
         __ERC165_init();
-        platformExecutor = _initialExecutor;
+        _platformExecutors.add(_initialExecutor);
         platformVault = _platformVault;
     }
 
     /**
-     * @dev Swap the platform executor. Expected to be protected by a smart contract wallet.
+     * @dev Add platform executor. Expected to be protected by a smart contract wallet.
      */
-    function swapPlatformExecutor(address newExecutor) external onlyOwner {
-        require(newExecutor != address(0), "Cannot set to null address");
-        emit PlatformExecutorSwapped(platformExecutor, newExecutor);
-        platformExecutor = newExecutor;
+    function addPlatformExecutor(address _executor) external onlyOwner {
+        require(_executor != address(0), "Cannot set to null address");
+        require(_platformExecutors.add(_executor), "Already added");
+        emit PlatformExecutorAdded(_executor);
     }
 
     /**
      * @dev Deprecate the platform executor.
      */
-    function deprecatePlatformExecutor() external onlyOwner {
-        emit PlatformExecutorDeprecated(platformExecutor);
-        platformExecutor = address(0);
+    function deprecatePlatformExecutor(address _executor) external onlyOwner {
+        require(_platformExecutors.remove(_executor), "Not deprecated");
+        emit PlatformExecutorDeprecated(_executor);
+    }
+
+    /**
+     * @dev Whitelists a currency
+     */
+    function whitelistCurrency(address _currency) external onlyOwner {
+        require(_whitelistedCurrencies.add(_currency), "Already whitelisted");
+        emit CurrencyWhitelisted(_currency);
+    }
+
+    /**
+     * @dev Unwhitelists a currency
+     */
+    function unwhitelistCurrency(address _currency) external onlyOwner {
+        require(_whitelistedCurrencies.remove(_currency), "Not whitelisted");
+        emit CurrencyUnwhitelisted(_currency);
     }
 
     /**
      * @dev Returns true if executor is the platform executor
      */
-    function isPlatformExecutor(address executor) external view returns (bool) {
-        return executor == platformExecutor;
+    function isPlatformExecutor(address _executor) external view returns (bool) {
+        return _platformExecutors.contains(_executor);
+    }
+
+    /**
+     * @dev Returns platform executors
+     */
+    function platformExecutors() external view returns (address[] memory) {
+        return _platformExecutors.values();
+    }
+
+    /**
+     * @dev Returns true if a currency is whitelisted
+     */
+    function isCurrencyWhitelisted(address _currency) external view returns (bool) {
+        return _whitelistedCurrencies.contains(_currency);
+    }
+
+    /**
+     * @dev Returns whitelisted currencies
+     */
+    function whitelistedCurrencies() external view returns (address[] memory) {
+        return _whitelistedCurrencies.values();
     }
 
     /**

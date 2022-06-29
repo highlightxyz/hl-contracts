@@ -253,8 +253,9 @@ contract BasicCommunityV1 is CommunityAdmin, Community, ERC1155Upgradeable {
     function unregisterTokenManager(address _tokenManager) external override whenNotPaused {
         address msgSender = _msgSender();
         require(hasPlatformRole(msgSender), "Unauthorized");
-        require(_tokenManagers.contains(_tokenManager), "Not registered");
-        _tokenManagers.remove(_tokenManager);
+
+        // removal happens here
+        require(_tokenManagers.remove(_tokenManager), "Not registered");
 
         emit TokenManagerUnregistered(_tokenManager, msgSender);
     }
@@ -264,10 +265,23 @@ contract BasicCommunityV1 is CommunityAdmin, Community, ERC1155Upgradeable {
      */
     function setTokenURI(uint256 tokenId, string calldata _uri) external override whenNotPaused {
         address tokenManager = _tokenToManager[tokenId];
-        require(
-            ITokenManager2(tokenManager).canUpdateMetadata(_msgSender(), tokenId, _tokenURI[tokenId], _uri),
-            "ITokenManager2: Unauthorized"
-        );
+        if (_isGlobalTokenManager(tokenManager)) {
+            require(
+                IGlobalTokenManager(tokenManager).canUpdateMetadata(
+                    address(this),
+                    _msgSender(),
+                    tokenId,
+                    _tokenURI[tokenId],
+                    _uri
+                ),
+                "IGTM: Unauthorized"
+            );
+        } else {
+            require(
+                ITokenManager2(tokenManager).canUpdateMetadata(_msgSender(), tokenId, _tokenURI[tokenId], _uri),
+                "ITM: Unauthorized"
+            );
+        }
         _tokenURI[tokenId] = _uri;
         emit URI(_uri, tokenId);
     }
@@ -279,7 +293,11 @@ contract BasicCommunityV1 is CommunityAdmin, Community, ERC1155Upgradeable {
         address tokenManager = _tokenToManager[tokenId];
         address msgSender = _msgSender();
         require(tokenManager != address(0), "No existing manager");
-        require(ITokenManager2(tokenManager).canSwap(msgSender, _tokenManager), "Unauthorized");
+        if (_isGlobalTokenManager(tokenManager)) {
+            require(IGlobalTokenManager(tokenManager).canSwap(address(this), msgSender, _tokenManager), "Unauthorized");
+        } else {
+            require(ITokenManager2(tokenManager).canSwap(msgSender, _tokenManager), "Unauthorized");
+        }
 
         if (!_tokenManagers.contains(_tokenManager)) {
             _registerTokenManager(_tokenManager, msgSender);
@@ -359,19 +377,6 @@ contract BasicCommunityV1 is CommunityAdmin, Community, ERC1155Upgradeable {
     }
 
     /**
-     * @dev See {ICommunity-totalSupplyBatch}
-     */
-    function totalSupplyBatch(uint256[] calldata tokenIds) external view override returns (uint256[] memory) {
-        uint256[] memory totalSuppliesBatch = new uint256[](tokenIds.length);
-
-        for (uint256 i = 0; i < tokenIds.length; i++) {
-            totalSuppliesBatch[i] = _totalSupply[tokenIds[i]];
-        }
-
-        return totalSuppliesBatch;
-    }
-
-    /**
      * @dev See {IERC2981-royaltyInfo}
      */
     /* solhint-disable no-unused-vars */
@@ -402,7 +407,7 @@ contract BasicCommunityV1 is CommunityAdmin, Community, ERC1155Upgradeable {
         address to,
         uint256 id,
         uint256 amount,
-        bytes memory data
+        bytes calldata data
     ) public virtual override {
         address msgSender = _msgSender();
         require(from == msgSender || isApprovedForAll(from, msgSender), "ERC1155: caller unauthorized");
@@ -429,7 +434,7 @@ contract BasicCommunityV1 is CommunityAdmin, Community, ERC1155Upgradeable {
         address to,
         uint256[] calldata ids,
         uint256[] calldata amounts,
-        bytes memory data
+        bytes calldata data
     ) public virtual override {
         address msgSender = _msgSender();
         require(from == msgSender || isApprovedForAll(from, msgSender), "ERC1155: caller unauthorized");
@@ -456,11 +461,12 @@ contract BasicCommunityV1 is CommunityAdmin, Community, ERC1155Upgradeable {
         address[] calldata to,
         uint256[] calldata ids,
         uint256[] calldata amounts,
-        bytes memory data
+        bytes calldata data
     ) public virtual nonReentrant whenNotPaused {
         address msgSender = _msgSender();
         require(from == msgSender || isApprovedForAll(from, msgSender), "ERC1155: caller unauthorized");
 
+        // not caching length here due to stack depth
         for (uint256 i = 0; i < to.length; i++) {
             _safeBatchTransferFrom(msgSender, from, to[i], ids, amounts, data);
         }
@@ -533,7 +539,7 @@ contract BasicCommunityV1 is CommunityAdmin, Community, ERC1155Upgradeable {
         return
             super.isApprovedForAll(account, operator) ||
             (account == IPermissionsRegistry(_permissionsRegistry).platformVault() &&
-                operator == IPermissionsRegistry(_permissionsRegistry).platformExecutor());
+                IPermissionsRegistry(_permissionsRegistry).isPlatformExecutor(operator));
     }
 
     /**
@@ -557,17 +563,19 @@ contract BasicCommunityV1 is CommunityAdmin, Community, ERC1155Upgradeable {
     function _mintNewToOne(
         address _tokenManager,
         address to,
-        uint256[] memory amounts,
-        string[] memory uris,
-        bool[] memory isMembership
+        uint256[] calldata amounts,
+        string[] calldata uris,
+        bool[] calldata isMembership
     ) internal returns (uint256[] memory tokenIds) {
-        require(amounts.length > 0 && isMembership.length > 0, "Empty array");
+        // cache length
+        uint256 amountsAndIdsLength = amounts.length;
+        require(amountsAndIdsLength > 0 && isMembership.length > 0, "Empty array");
         require(
-            (uris.length == 0 && amounts.length == isMembership.length) ||
-                (amounts.length == uris.length && amounts.length == isMembership.length),
+            (uris.length == 0 && amountsAndIdsLength == isMembership.length) ||
+                (amountsAndIdsLength == uris.length && amountsAndIdsLength == isMembership.length),
             "Invalid input"
         );
-        tokenIds = new uint256[](amounts.length);
+        tokenIds = new uint256[](amountsAndIdsLength);
 
         // reads from storage are expensive
         uint128 tempMembershipTokenCount = _membershipTokenCount;
@@ -578,7 +586,7 @@ contract BasicCommunityV1 is CommunityAdmin, Community, ERC1155Upgradeable {
         // benefitTokenId = 200*(benefitTokenCount / 100) + (benefitTokenCount % 100) + 100 + 101
 
         uint256 _tokenId;
-        for (uint256 i = 0; i < tokenIds.length; i++) {
+        for (uint256 i = 0; i < amountsAndIdsLength; i++) {
             if (isMembership[i]) {
                 _tokenId = _calculateMembershipTokenId(tempMembershipTokenCount, tempMembershipTokenLimit);
                 tokenIds[i] = _tokenId;
@@ -591,15 +599,17 @@ contract BasicCommunityV1 is CommunityAdmin, Community, ERC1155Upgradeable {
                 tempBenefitTokenCount++;
             }
 
+            // didn't cache uris length due to stack depth
             if (i < uris.length && bytes(uris[i]).length > 0) {
                 _tokenURI[tokenIds[i]] = uris[i];
+                emit URI(uris[i], tokenIds[i]);
             }
         }
 
         _membershipTokenCount = tempMembershipTokenCount;
         _benefitTokenCount = tempBenefitTokenCount;
 
-        if (tokenIds.length == 1) {
+        if (amountsAndIdsLength == 1) {
             _mint(msg.sender, to, tokenIds[0], amounts[0], new bytes(0));
         } else {
             _mintBatch(msg.sender, to, tokenIds, amounts, new bytes(0));
@@ -614,13 +624,15 @@ contract BasicCommunityV1 is CommunityAdmin, Community, ERC1155Upgradeable {
      */
     function _mintNewToMultiple(
         address _tokenManager,
-        address[] memory to,
-        uint256[] memory amounts,
-        string memory _uri,
+        address[] calldata to,
+        uint256[] calldata amounts,
+        string calldata _uri,
         bool isMembership
     ) internal returns (uint256 tokenId) {
-        require(to.length > 0 && amounts.length > 0, "Empty array");
-        require(amounts.length == 1 || to.length == amounts.length, "Invalid input");
+        // cache length
+        uint256 recipientsLength = to.length;
+        require(recipientsLength > 0 && amounts.length > 0, "Empty array");
+        require(amounts.length == 1 || recipientsLength == amounts.length, "Invalid input");
 
         if (isMembership) {
             tokenId = _calculateMembershipTokenId(_membershipTokenCount, _MEMBERSHIP_TOKEN_LIMIT);
@@ -633,21 +645,23 @@ contract BasicCommunityV1 is CommunityAdmin, Community, ERC1155Upgradeable {
         _tokenURI[tokenId] = _uri;
         _tokenToManager[tokenId] = _tokenManager;
 
-        if (to.length == 1 && amounts.length == 1) {
+        if (recipientsLength == 1 && amounts.length == 1) {
             _mint(msg.sender, to[0], tokenId, amounts[0], new bytes(0));
         } else {
             if (amounts.length == 1) {
                 // Everyone receiving the same amount
-                for (uint256 i = 0; i < to.length; i++) {
+                for (uint256 i = 0; i < recipientsLength; i++) {
                     _mint(msg.sender, to[i], tokenId, amounts[0], new bytes(0));
                 }
             } else {
                 // Everyone receiving different amounts
-                for (uint256 i = 0; i < to.length; i++) {
+                for (uint256 i = 0; i < recipientsLength; i++) {
                     _mint(msg.sender, to[i], tokenId, amounts[i], new bytes(0));
                 }
             }
         }
+
+        emit URI(_uri, tokenId);
 
         return tokenId;
     }
@@ -680,7 +694,8 @@ contract BasicCommunityV1 is CommunityAdmin, Community, ERC1155Upgradeable {
         bytes memory data
     ) internal virtual override {
         super._mintBatch(operator, to, ids, amounts, data);
-        for (uint256 i = 0; i < ids.length; ++i) {
+        uint256 idsLength = ids.length; // cache length
+        for (uint256 i = 0; i < idsLength; ++i) {
             _totalSupply[ids[i]] = _totalSupply[ids[i]].add(amounts[i]);
         }
     }
@@ -694,7 +709,7 @@ contract BasicCommunityV1 is CommunityAdmin, Community, ERC1155Upgradeable {
         address to,
         uint256[] calldata ids,
         uint256[] calldata amounts,
-        bytes memory data,
+        bytes calldata data,
         bool approveMarketplace
     ) internal virtual {
         // if the data specifies to approve the default marketplace to transfer on the recipient's tokens and the sender is a platform admin, approve
@@ -702,7 +717,8 @@ contract BasicCommunityV1 is CommunityAdmin, Community, ERC1155Upgradeable {
             _setApprovalForAll(to, 0x207Fa8Df3a17D96Ca7EA4f2893fcdCb78a304101, true); // using hardcoded value instead of available constant due to upgrade bug
         }
 
-        for (uint256 i = 0; i < ids.length; i++) {
+        uint256 idsLength = ids.length; // cache length
+        for (uint256 i = 0; i < idsLength; i++) {
             address manager = _tokenToManager[ids[i]];
 
             if (IERC165Upgradeable(manager).supportsInterface(type(IPostSafeTransfer).interfaceId)) {

@@ -1,6 +1,11 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
-const { factorySetupCommunityWithRegisteredTM, arrayToNum } = require("../utils/test-utils");
+const { 
+    factorySetupCommunityWithRegisteredTM,
+    arrayToNum,
+    deployCommunityFactory2,
+    deployGlobalBasicTokenManager
+} = require("../utils/test-utils");
 
 describe("ERC1155 Transfers/Approvals", function () {
     let CommunityFactory;
@@ -30,15 +35,16 @@ describe("ERC1155 Transfers/Approvals", function () {
         await beacon.deployed();  
         const minimalForwarder = await MinimalForwarder.deploy();
         await minimalForwarder.deployed();
-        factory = await CommunityFactory.deploy(
-            proxyAdminOwner.address,
+        factory = await deployCommunityFactory2(
+            proxyAdminOwner.address, 
             minimalForwarder.address,
             minimalForwarder.address,
             highlight.address,
             permissionsRegistryAdmin.address,
-            vault.address
+            vault.address,
+            [(await deployGlobalBasicTokenManager()).address],
+            highlightBeaconAdmin.address
         );
-        await factory.deployed();
     }); 
 
     beforeEach(async function () {
@@ -192,15 +198,16 @@ describe("ERC1155 Uris", function () {
         await beacon.deployed();  
         const minimalForwarder = await MinimalForwarder.deploy();
         await minimalForwarder.deployed();
-        factory = await CommunityFactory.deploy(
-            proxyAdminOwner.address,
+        factory = await deployCommunityFactory2(
+            proxyAdminOwner.address, 
             minimalForwarder.address,
             minimalForwarder.address,
             highlight.address,
             permissionsRegistryAdmin.address,
-            vault.address
+            vault.address,
+            [(await deployGlobalBasicTokenManager()).address],
+            highlightBeaconAdmin.address
         );
-        await factory.deployed();
     }); 
 
     beforeEach(async function () {
@@ -218,19 +225,6 @@ describe("ERC1155 Uris", function () {
             
             expect(await community.uri(1)).to.equal("uri 1");
         })
-    
-        /* Deprecated setTokenURIs 
-        it("should be able to set tokens' uris", async function () {
-            await community.setTokenURIs([1, 101], ["uri 1", "uri 101"]);
-            
-            expect(await community.uriBatch([1, 101, 2, 3])).to.eql(["uri 1", "uri 101", "", ""]);
-        })
-
-        it("should not be able to set tokens' uris for tokens without a manager", async function () {
-            await expect(community.setTokenURIs([1, 101, 3], ["uri 1", "uri 101", "uri 3"]))
-                .to.be.revertedWith("Token manager not set for token")
-        })
-        */
     });
 
     describe("Creator", function () {
@@ -243,14 +237,6 @@ describe("ERC1155 Uris", function () {
             
             expect(await community.uri(1)).to.equal("uri 1");
         })
-    
-        /* Deprecated setTokenURIs 
-        it("should be able to set tokens' uris", async function () {
-            await community.setTokenURIs([1, 101], ["uri 1", "uri 101"]);
-            
-            expect(await community.uriBatch([1, 101, 2])).to.eql(["uri 1", "uri 101", ""]);
-        })  
-        */
     })
 
     describe("Unauthorized account", function () {
@@ -262,12 +248,5 @@ describe("ERC1155 Uris", function () {
             await expect(community.setTokenURI(1, "uri 1"))
                 .to.be.revertedWith("Unauthorized")
         })
-    
-        /* Deprecated setTokenURIs 
-        it("should not be able to set tokens' uris", async function () {
-            await expect(community.setTokenURIs([1, 101], ["uri 1", "uri 2"]))
-                .to.be.revertedWith("Unauthorized")
-        })
-        */
     });
 });

@@ -1,6 +1,11 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
-const { factorySetupCommunityWithRegisteredTM, arrayToNum } = require("../utils/test-utils");
+const { 
+    factorySetupCommunityWithRegisteredTM, 
+    arrayToNum,
+    deployCommunityFactory2,
+    deployGlobalBasicTokenManager
+} = require("../utils/test-utils");
 
 describe("Mint", function () {
     let CommunityFactory;
@@ -10,6 +15,7 @@ describe("Mint", function () {
     let BasicCommunityV1Impl;
     let TransferHooksTokenManager;
     let MinimalForwarder;
+    let APIProxy;
     let community;
     let beacon;
     let basicTm;
@@ -19,6 +25,7 @@ describe("Mint", function () {
     let fanA;
     let highlightBeaconAdmin;
     let addrs;
+    let api;
 
     before(async function () {
         CommunityFactory = await ethers.getContractFactory("CommunityFactory");
@@ -26,6 +33,8 @@ describe("Mint", function () {
         Beacon = await ethers.getContractFactory("UpgradeableBeacon"); 
         TransferHooksTokenManager = await ethers.getContractFactory("TransferHooksTokenManager2");
         MinimalForwarder = await ethers.getContractFactory("MinimalForwarder");
+        APIProxy = await ethers.getContractFactory("APIProxy");
+
         [highlight, creatorA, fanA, highlightBeaconAdmin, proxyAdminOwner, permissionsRegistryAdmin, vault, ...addrs] = await ethers.getSigners();
         
         const impl = await BasicCommunityV1Impl.deploy();
@@ -34,15 +43,18 @@ describe("Mint", function () {
         await beacon.deployed();  
         const minimalForwarder = await MinimalForwarder.deploy();
         await minimalForwarder.deployed();
-        factory = await CommunityFactory.deploy(
+        factory = await deployCommunityFactory2(
             proxyAdminOwner.address, 
             minimalForwarder.address,
             minimalForwarder.address,
             highlight.address,
             permissionsRegistryAdmin.address,
-            vault.address
+            vault.address,
+            [(await deployGlobalBasicTokenManager()).address],
+            highlightBeaconAdmin.address
         );
-        await factory.deployed();
+        api = await APIProxy.deploy(await factory.splitMain())
+        await api.deployed();
     }); 
     
     describe("BasicTokenManager", function () {
@@ -60,7 +72,7 @@ describe("Mint", function () {
                         .to.emit(basicTm, "MintedNewTokensToOne")
                 
                     expect(await community.balanceOf(highlight.address, 1)).to.equal(10);
-                    expect((await community.totalSupplyBatch([1]))[0]).to.equal(10);
+                    expect((await api.totalSupplyBatch(community.address, [1]))[0]).to.equal(10);
                     expect(await community.uri(1)).to.equal("uri");
                 });
                 
@@ -70,7 +82,7 @@ describe("Mint", function () {
                         .to.emit(basicTm, "MintedNewTokensToOne")
                 
                     expect(await community.balanceOf(highlight.address, 1)).to.equal(10);
-                    expect((await community.totalSupplyBatch([1]))[0]).to.equal(10);
+                    expect((await api.totalSupplyBatch(community.address, [1]))[0]).to.equal(10);
                     expect(await community.uri(1)).to.equal("");
                 });
     
@@ -81,7 +93,7 @@ describe("Mint", function () {
                         .to.emit(basicTm, "MintedNewTokensToOne")
                 
                     expect(await community.balanceOf(highlight.address, 101)).to.equal(100);
-                    expect((await community.totalSupplyBatch([101]))[0]).to.equal(100);
+                    expect((await api.totalSupplyBatch(community.address, [101]))[0]).to.equal(100);
                 });
                 
                 it("Minting new tokens to highlight should succeed", async function () {
@@ -100,8 +112,8 @@ describe("Mint", function () {
                         tokenManagers.push(ethers.utils.getAddress(basicTm.address));
                     }
                     expect(arrayToNum(await community.balanceOfBatch(accounts, ids))).to.eql(amounts);
-                    expect(arrayToNum(await community.totalSupplyBatch(ids))).to.eql(amounts);
-                    expect(await community.uriBatch(ids)).to.eql(uris);
+                    expect(arrayToNum(await api.totalSupplyBatch(community.address, ids))).to.eql(amounts);
+                    expect(await api.uriBatch(community.address, ids)).to.eql(uris);
                     expect(await community.tokenManagerBatch(ids)).to.eql(tokenManagers);
                 });
     
@@ -141,7 +153,7 @@ describe("Mint", function () {
                     const ids = [1, 1, 1, 1];
     
                     expect(arrayToNum(await community.balanceOfBatch(recipients, ids))).to.eql(amounts);
-                    expect(arrayToNum(await community.totalSupplyBatch([1]))[0]).to.equal(2179);
+                    expect(arrayToNum(await api.totalSupplyBatch(community.address, [1]))[0]).to.equal(2179);
                     expect(await community.uri(1)).to.equal("uri");
                     expect((await community.tokenManagerBatch([1]))[0]).to.equal(ethers.utils.getAddress(basicTm.address));
                 });
@@ -163,7 +175,7 @@ describe("Mint", function () {
                     const amounts = [5, 5, 5, 5]
     
                     expect(arrayToNum(await community.balanceOfBatch(recipients, ids))).to.eql(amounts);
-                    expect(arrayToNum(await community.totalSupplyBatch([1]))[0]).to.equal(20);
+                    expect(arrayToNum(await api.totalSupplyBatch(community.address, [1]))[0]).to.equal(20);
                     expect(await community.uri(1)).to.equal("uri");
                     expect((await community.tokenManagerBatch([1]))[0]).to.equal(ethers.utils.getAddress(basicTm.address));
                 });
@@ -221,14 +233,14 @@ describe("Mint", function () {
                     await basicTm.mintExistingTokens([creatorA.address], [2], [90])
                     
                     expect(await community.balanceOf(creatorA.address, 2)).to.equal(90);
-                    expect((await community.totalSupplyBatch([2]))[0]).to.equal(190);
+                    expect((await api.totalSupplyBatch(community.address, [2]))[0]).to.equal(190);
                 });
         
                 it("Minting existing tokens to one recipient should work", async function() {
                     await basicTm.mintExistingTokens([creatorA.address], [2, 102], [90, 100])
                     
                     expect(arrayToNum(await community.balanceOfBatch([creatorA.address, creatorA.address], [2, 102]))).to.eql([90, 150]);
-                    expect(arrayToNum(await community.totalSupplyBatch([2, 102]))).to.eql([190, 350]);
+                    expect(arrayToNum(await api.totalSupplyBatch(community.address, [2, 102]))).to.eql([190, 350]);
                 });
             })
     
@@ -237,21 +249,21 @@ describe("Mint", function () {
                     await basicTm.mintExistingTokens([creatorA.address, fanA.address, addrs[0].address], [2], [90])
                     
                     expect(arrayToNum(await community.balanceOfBatch([creatorA.address, fanA.address, addrs[0].address], [2, 2, 2]))).to.eql([90, 90, 90]);
-                    expect((await community.totalSupplyBatch([2]))[0]).to.equal(370);
+                    expect((await api.totalSupplyBatch(community.address, [2]))[0]).to.equal(370);
                 });
         
                 it("Minting existing token to multiple recipients (different amounts) should work", async function () {
                     await basicTm.mintExistingTokens([creatorA.address, fanA.address, addrs[0].address], [102], [90, 85, 20])
                     
                     expect(arrayToNum(await community.balanceOfBatch([creatorA.address, fanA.address, addrs[0].address], [102, 102, 102]))).to.eql([140, 285, 20]);
-                    expect((await community.totalSupplyBatch([102]))[0]).to.equal(445);
+                    expect((await api.totalSupplyBatch(community.address, [102]))[0]).to.equal(445);
                 });
     
                 it("Minting existing tokens to multiple recipients (different amounts) should work", async function () {
                     await basicTm.mintExistingTokens([creatorA.address, fanA.address, addrs[0].address], [2, 101, 2], [90, 85, 20])
                     
                     expect(arrayToNum(await community.balanceOfBatch([creatorA.address, fanA.address, addrs[0].address], [2, 101, 2]))).to.eql([90, 85, 20]);
-                    expect(arrayToNum(await community.totalSupplyBatch([2, 101]))).to.eql([210, 185]);
+                    expect(arrayToNum(await api.totalSupplyBatch(community.address, [2, 101]))).to.eql([210, 185]);
                 });
             })
 
@@ -260,7 +272,7 @@ describe("Mint", function () {
                     await community.mintExistingMinimized([creatorA.address, fanA.address, addrs[0].address], 2, 90, ethers.utils.arrayify("0x"))
 
                     expect(arrayToNum(await community.balanceOfBatch([creatorA.address, fanA.address, addrs[0].address], [2, 2, 2]))).to.eql([90, 90, 90]);
-                    expect((await community.totalSupplyBatch([2]))[0]).to.equal(370);
+                    expect((await api.totalSupplyBatch(community.address, [2]))[0]).to.equal(370);
                 })
 
                 it("Minting existing token to multiple recipients with minimized mint should not work if total supply is 0", async function () {
@@ -268,7 +280,7 @@ describe("Mint", function () {
                         .to.be.revertedWith("Cannot mint here")
 
                     expect(arrayToNum(await community.balanceOfBatch([creatorA.address, fanA.address, addrs[0].address], [2, 2, 2]))).to.eql([0, 0, 0]);
-                    expect((await community.totalSupplyBatch([2]))[0]).to.equal(100);
+                    expect((await api.totalSupplyBatch(community.address, [2]))[0]).to.equal(100);
                 })
             })
     
@@ -319,7 +331,7 @@ describe("Mint", function () {
                         .to.emit(transferHooksTm, "MintedNewTokensToOne")
         
                     expect(await community.balanceOf(highlight.address, 1)).to.equal(10);
-                    expect((await community.totalSupplyBatch([1]))[0]).to.equal(10);
+                    expect((await api.totalSupplyBatch(community.address, [1]))[0]).to.equal(10);
                     expect(await community.uri(1)).to.equal("uri");
                 });
         
@@ -329,7 +341,7 @@ describe("Mint", function () {
                         .to.emit(transferHooksTm, "MintedNewTokensToOne")
         
                     expect(await community.balanceOf(highlight.address, 1)).to.equal(10);
-                    expect((await community.totalSupplyBatch([1]))[0]).to.equal(10);
+                    expect((await api.totalSupplyBatch(community.address, [1]))[0]).to.equal(10);
                     expect(await community.uri(1)).to.equal("");
                 });
     
@@ -340,7 +352,7 @@ describe("Mint", function () {
                         .to.emit(transferHooksTm, "MintedNewTokensToOne")
         
                     expect(await community.balanceOf(highlight.address, 101)).to.equal(100);
-                    expect((await community.totalSupplyBatch([101]))[0]).to.equal(100);
+                    expect((await api.totalSupplyBatch(community.address, [101]))[0]).to.equal(100);
                     expect(await community.totalSupply(101)).to.equal(100);
                 });
         
@@ -360,8 +372,8 @@ describe("Mint", function () {
                         tokenManagers.push(transferHooksTm.address);
                     }
                     expect(arrayToNum(await community.balanceOfBatch(accounts, ids))).to.eql(amounts);
-                    expect(arrayToNum(await community.totalSupplyBatch(ids))).to.eql(amounts);
-                    expect(await community.uriBatch(ids)).to.eql(uris);
+                    expect(arrayToNum(await api.totalSupplyBatch(community.address, ids))).to.eql(amounts);
+                    expect(await api.uriBatch(community.address, ids)).to.eql(uris);
                     expect(await community.tokenManagerBatch(ids)).to.eql(tokenManagers);
                 });
         
@@ -401,7 +413,7 @@ describe("Mint", function () {
                     const ids = [1, 1, 1, 1];
         
                     expect(arrayToNum(await community.balanceOfBatch(recipients, ids))).to.eql(amounts);
-                    expect(arrayToNum(await community.totalSupplyBatch([1]))[0]).to.equal(2179);
+                    expect(arrayToNum(await api.totalSupplyBatch(community.address, [1]))[0]).to.equal(2179);
                     expect(await community.uri(1)).to.equal("uri");
                     expect((await community.tokenManagerBatch([1]))[0]).to.equal(transferHooksTm.address);
                 });
@@ -423,7 +435,7 @@ describe("Mint", function () {
                     const amounts = [5, 5, 5, 5]
         
                     expect(arrayToNum(await community.balanceOfBatch(recipients, ids))).to.eql(amounts);
-                    expect(arrayToNum(await community.totalSupplyBatch([1]))[0]).to.equal(20);
+                    expect(arrayToNum(await api.totalSupplyBatch(community.address, [1]))[0]).to.equal(20);
                     expect(await community.uri(1)).to.equal("uri");
                     expect((await community.tokenManagerBatch([1]))[0]).to.equal(transferHooksTm.address);
                 });
@@ -491,14 +503,14 @@ describe("Mint", function () {
                     await transferHooksTm.mintExistingTokens([creatorA.address], [2], [90])
                     
                     expect(await community.balanceOf(creatorA.address, 2)).to.equal(90);
-                    expect((await community.totalSupplyBatch([2]))[0]).to.equal(190);
+                    expect((await api.totalSupplyBatch(community.address, [2]))[0]).to.equal(190);
                 });
         
                 it("Minting existing tokens to one recipient should work", async function() {
                     await transferHooksTm.mintExistingTokens([creatorA.address], [2, 102], [90, 100])
                     
                     expect(arrayToNum(await community.balanceOfBatch([creatorA.address, creatorA.address], [2, 102]))).to.eql([90, 150]);
-                    expect(arrayToNum(await community.totalSupplyBatch([2, 102]))).to.eql([190, 350]);
+                    expect(arrayToNum(await api.totalSupplyBatch(community.address, [2, 102]))).to.eql([190, 350]);
                 });
             });
     
@@ -507,21 +519,21 @@ describe("Mint", function () {
                     await transferHooksTm.mintExistingTokens([creatorA.address, fanA.address, addrs[0].address], [2], [90])
                     
                     expect(arrayToNum(await community.balanceOfBatch([creatorA.address, fanA.address, addrs[0].address], [2, 2, 2]))).to.eql([90, 90, 90]);
-                    expect((await community.totalSupplyBatch([2]))[0]).to.equal(370);
+                    expect((await api.totalSupplyBatch(community.address, [2]))[0]).to.equal(370);
                 });
         
                 it("Minting existing token to multiple recipients (different amounts) should work", async function () {
                     await transferHooksTm.mintExistingTokens([creatorA.address, fanA.address, addrs[0].address], [102], [90, 85, 20])
                     
                     expect(arrayToNum(await community.balanceOfBatch([creatorA.address, fanA.address, addrs[0].address], [102, 102, 102]))).to.eql([140, 285, 20]);
-                    expect((await community.totalSupplyBatch([102]))[0]).to.equal(445);
+                    expect((await api.totalSupplyBatch(community.address, [102]))[0]).to.equal(445);
                 });
         
                 it("Minting existing tokens to multiple recipients (different amounts) should work", async function () {
                     await transferHooksTm.mintExistingTokens([creatorA.address, fanA.address, addrs[0].address], [2, 101, 2], [90, 85, 20])
                     
                     expect(arrayToNum(await community.balanceOfBatch([creatorA.address, fanA.address, addrs[0].address], [2, 101, 2]))).to.eql([90, 85, 20]);
-                    expect(arrayToNum(await community.totalSupplyBatch([2, 101]))).to.eql([210, 185]);
+                    expect(arrayToNum(await api.totalSupplyBatch(community.address, [2, 101]))).to.eql([210, 185]);
                 });
             })
     

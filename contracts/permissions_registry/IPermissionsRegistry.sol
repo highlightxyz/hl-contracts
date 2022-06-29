@@ -5,17 +5,28 @@ pragma solidity 0.8.10;
 /**
  * @title Highlight permissions registry interface
  * @author ishan@highlight.xyz
+ * @author sarib@highlight.xyz
  */
 interface IPermissionsRegistry {
     /**
-     * @notice Emitted when the platform executor is swapped
+     * @notice Emitted when a platform executor is added
      */
-    event PlatformExecutorSwapped(address indexed oldExecutor, address indexed newExecutor);
+    event PlatformExecutorAdded(address indexed newExecutor);
 
     /**
-     * @notice Emitted when the platform executor is deprecated
+     * @notice Emitted when a platform executor is deprecated
      */
     event PlatformExecutorDeprecated(address indexed oldExecutor);
+
+    /**
+     * @notice Emitted when a currrency is whitelisted system wide
+     */
+    event CurrencyWhitelisted(address indexed currency);
+
+    /**
+     * @notice Emitted when a currrency is unwhitelisted system wide
+     */
+    event CurrencyUnwhitelisted(address indexed currency);
 
     /**
      * @notice Initialize the registry with the platform executor
@@ -25,12 +36,22 @@ interface IPermissionsRegistry {
     /**
      * @dev Swap the platform executor. Expected to be protected by a smart contract wallet.
      */
-    function swapPlatformExecutor(address newExecutor) external;
+    function addPlatformExecutor(address _executor) external;
 
     /**
      * @dev Deprecate the platform executor.
      */
-    function deprecatePlatformExecutor() external;
+    function deprecatePlatformExecutor(address _executor) external;
+
+    /**
+     * @dev Whitelists a currency
+     */
+    function whitelistCurrency(address _currency) external;
+
+    /**
+     * @dev Unwhitelists a currency
+     */
+    function unwhitelistCurrency(address _currency) external;
 
     /**
      * @dev Returns true if executor is the platform executor
@@ -40,10 +61,20 @@ interface IPermissionsRegistry {
     /**
      * @dev Returns the platform executor
      */
-    function platformExecutor() external view returns (address);
+    function platformExecutors() external view returns (address[] memory);
 
     /**
      * @dev Returns the platform vault
      */
     function platformVault() external view returns (address);
+
+    /**
+     * @dev Returns true if a currency is whitelisted
+     */
+    function isCurrencyWhitelisted(address _currency) external view returns (bool);
+
+    /**
+     * @dev Returns whitelisted currencies
+     */
+    function whitelistedCurrencies() external view returns (address[] memory);
 }

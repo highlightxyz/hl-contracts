@@ -169,6 +169,17 @@ contract SplitMain is ISplitMain, ERC2771ContextUpgradeable {
         _;
     }
 
+    /** @notice Reverts if the sender is not the primary controller of the split
+     *  @param split Split whose primary controller is checked
+     */
+    modifier isPrimaryController(address split) {
+        address msgSender = _msgSender();
+        if (msgSender != _splits[split].primaryController) {
+            revert Unauthorized(msgSender);
+        }
+        _;
+    }
+
     /**
      * FUNCTIONS
      */
@@ -240,11 +251,8 @@ contract SplitMain is ISplitMain, ERC2771ContextUpgradeable {
         external
         override
         validNewController(newPrimaryController)
+        isPrimaryController(split)
     {
-        address msgSender = _msgSender();
-        if (msgSender != _splits[split].primaryController) {
-            revert Unauthorized(msgSender);
-        }
         emit NewPrimaryController(split, _splits[split].primaryController, newPrimaryController);
         _splits[split].primaryController = newPrimaryController;
     }
@@ -273,11 +281,7 @@ contract SplitMain is ISplitMain, ERC2771ContextUpgradeable {
     /** @notice Renounces primary controller rights over split
      *  @param split Address of split to renounce rights over
      */
-    function renouncePrimaryController(address split) external override {
-        address msgSender = _msgSender();
-        if (msgSender != _splits[split].primaryController) {
-            revert Unauthorized(msgSender);
-        }
+    function renouncePrimaryController(address split) external override isPrimaryController(split) {
         emit NewPrimaryController(split, _splits[split].primaryController, address(0));
         _splits[split].primaryController = address(0);
     }
@@ -302,16 +306,17 @@ contract SplitMain is ISplitMain, ERC2771ContextUpgradeable {
      */
     function distributeETH(address split, address distributorAddress) external override {
         Split memory _split = _splits[split];
+        uint256 secondaryAccountLength = _split.secondaryAccounts.length; // cache length
 
         // cannot simply append on to _split.secondaryAccounts and _split.secondaryAllocations
-        address[] memory accounts = new address[](_split.secondaryAccounts.length + 1);
-        uint32[] memory percentages = new uint32[](_split.secondaryAccounts.length + 1);
-        for (uint256 i = 0; i < _split.secondaryAccounts.length; i++) {
+        address[] memory accounts = new address[](secondaryAccountLength + 1);
+        uint32[] memory percentages = new uint32[](secondaryAccountLength + 1);
+        for (uint256 i = 0; i < secondaryAccountLength; i++) {
             accounts[i] = _split.secondaryAccounts[i];
             percentages[i] = _split.secondaryAllocations[i];
         }
-        accounts[_split.secondaryAccounts.length] = _split.primaryController;
-        percentages[_split.secondaryAccounts.length] = _split.primaryAllocation;
+        accounts[secondaryAccountLength] = _split.primaryController;
+        percentages[secondaryAccountLength] = _split.primaryAllocation;
 
         _distributeETH(split, accounts, percentages, _split.distributorFee, distributorAddress);
     }
@@ -329,16 +334,17 @@ contract SplitMain is ISplitMain, ERC2771ContextUpgradeable {
         address distributorAddress
     ) external override {
         Split memory _split = _splits[split];
+        uint256 secondaryAccountLength = _split.secondaryAccounts.length; // cache length
 
         // cannot simply append on to _split.secondaryAccounts and _split.secondaryAllocations
-        address[] memory accounts = new address[](_split.secondaryAccounts.length + 1);
-        uint32[] memory percentages = new uint32[](_split.secondaryAccounts.length + 1);
-        for (uint256 i = 0; i < _split.secondaryAccounts.length; i++) {
+        address[] memory accounts = new address[](secondaryAccountLength + 1);
+        uint32[] memory percentages = new uint32[](secondaryAccountLength + 1);
+        for (uint256 i = 0; i < secondaryAccountLength; i++) {
             accounts[i] = _split.secondaryAccounts[i];
             percentages[i] = _split.secondaryAllocations[i];
         }
-        accounts[_split.secondaryAccounts.length] = _split.primaryController;
-        percentages[_split.secondaryAccounts.length] = _split.primaryAllocation;
+        accounts[secondaryAccountLength] = _split.primaryController;
+        percentages[secondaryAccountLength] = _split.primaryAllocation;
 
         _distributeERC20(split, token, accounts, percentages, _split.distributorFee, distributorAddress);
     }
@@ -591,7 +597,7 @@ contract SplitMain is ISplitMain, ERC2771ContextUpgradeable {
         Split memory _split,
         address account
     ) internal {
-        uint256 secondaryControllersLength = _split.secondaryControllers.length;
+        uint256 secondaryControllersLength = _split.secondaryControllers.length; // cache length
         for (uint256 i = 0; i < secondaryControllersLength; i++) {
             if (_split.secondaryControllers[i] == account) {
                 _splits[split].secondaryControllers[i] = _split.secondaryControllers[secondaryControllersLength - 1]; // fill in spot with last element
@@ -608,7 +614,7 @@ contract SplitMain is ISplitMain, ERC2771ContextUpgradeable {
      *  @param numbers Array of uint32s to sum
      *  @return sum Sum of `numbers`.
      */
-    function _getSum(uint32[] memory numbers, uint32 finalNumber) internal pure returns (uint32 sum) {
+    function _getSum(uint32[] calldata numbers, uint32 finalNumber) internal pure returns (uint32 sum) {
         // overflow should be impossible in for-loop index
         uint256 numbersLength = numbers.length;
         for (uint256 i = 0; i < numbersLength; ) {
@@ -669,7 +675,8 @@ contract SplitMain is ISplitMain, ERC2771ContextUpgradeable {
      *  @return If account is secondary controller in split
      */
     function _isSecondaryController(Split memory _split, address account) internal pure returns (bool) {
-        for (uint256 i = 0; i < _split.secondaryControllers.length; i++) {
+        uint256 secondaryControllersLength = _split.secondaryControllers.length; // cache length
+        for (uint256 i = 0; i < secondaryControllersLength; i++) {
             if (_split.secondaryControllers[i] == account) {
                 return true;
             }

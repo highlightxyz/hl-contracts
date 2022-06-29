@@ -199,7 +199,7 @@ interface ICommunity {
         address[] calldata to,
         uint256[] calldata ids,
         uint256[] calldata amounts,
-        bytes memory data
+        bytes calldata data
     ) external;
 
     /**
@@ -263,18 +263,6 @@ interface ICommunity {
      * @return The total supply of the given token
      */
     function totalSupply(uint256 tokenId) external view returns (uint256);
-
-    /**
-     * @param tokenIds The tokens who's total supplies are returned
-     * @return The total supplies of the given tokens
-     */
-    function totalSupplyBatch(uint256[] calldata tokenIds) external view returns (uint256[] memory);
-
-    /**
-     * @param tokenIds The tokens who's uris are returned
-     * @return The uris of the given tokens
-     */
-    function uriBatch(uint256[] calldata tokenIds) external view returns (string[] memory);
 
     /**
      * @notice Community name

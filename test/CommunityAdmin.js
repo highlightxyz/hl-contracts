@@ -2,6 +2,8 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { 
     factorySetupCommunityWithRegisteredTM, 
+    deployCommunityFactory2,
+    deployGlobalBasicTokenManager,
     DEFAULT_ADMIN_ROLE, 
     PLATFORM_ROLE, 
     COMMUNITY_ADMIN_ROLE 
@@ -39,15 +41,16 @@ describe("CommunityAdmin", function () {
         await beacon.deployed();  
         const minimalForwarder = await MinimalForwarder.deploy();
         await minimalForwarder.deployed();
-        factory = await CommunityFactory.deploy(
-            proxyAdminOwner.address,
+        factory = await deployCommunityFactory2(
+            proxyAdminOwner.address, 
             minimalForwarder.address,
             minimalForwarder.address,
             highlight.address,
             permissionsRegistryAdmin.address,
-            vault.address
+            vault.address,
+            [(await deployGlobalBasicTokenManager()).address],
+            highlightBeaconAdmin.address
         );
-        await factory.deployed();
     });
 
     beforeEach(async function () {

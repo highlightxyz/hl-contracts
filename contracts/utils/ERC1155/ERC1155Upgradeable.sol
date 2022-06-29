@@ -99,11 +99,12 @@ contract ERC1155Upgradeable is
         override
         returns (uint256[] memory)
     {
-        require(accounts.length == ids.length, "ERC1155: accounts and ids length mismatch");
+        uint256 accountsLength = accounts.length; // cache length
+        require(accountsLength == ids.length, "ERC1155: length mismatch");
 
-        uint256[] memory batchBalances = new uint256[](accounts.length);
+        uint256[] memory batchBalances = new uint256[](accountsLength);
 
-        for (uint256 i = 0; i < accounts.length; ++i) {
+        for (uint256 i = 0; i < accountsLength; ++i) {
             batchBalances[i] = balanceOf(accounts[i], ids[i]);
         }
 
@@ -202,10 +203,11 @@ contract ERC1155Upgradeable is
         uint256[] memory amounts,
         bytes memory data
     ) internal virtual {
-        require(ids.length == amounts.length, "ERC1155: ids and amounts length mismatch");
-        require(to != address(0), "ERC1155: transfer to the zero address");
+        uint256 idsLength = ids.length; // cache length
+        require(idsLength == amounts.length, "ERC1155: length mismatch");
+        require(to != address(0), "ERC1155: transfer to zero");
 
-        for (uint256 i = 0; i < ids.length; ++i) {
+        for (uint256 i = 0; i < idsLength; ++i) {
             uint256 id = ids[i];
             uint256 amount = amounts[i];
 
@@ -264,10 +266,11 @@ contract ERC1155Upgradeable is
         uint256[] memory amounts,
         bytes memory data
     ) internal virtual {
-        require(to != address(0), "ERC1155: mint to the zero address");
-        require(ids.length == amounts.length, "ERC1155: ids and amounts length mismatch");
+        require(to != address(0), "ERC1155: mint to zero");
+        uint256 idsLength = ids.length; // cache length
+        require(idsLength == amounts.length, "ERC1155: length mismatch");
 
-        for (uint256 i = 0; i < ids.length; i++) {
+        for (uint256 i = 0; i < idsLength; i++) {
             _balances[ids[i]][to] += amounts[i];
         }
 
@@ -314,15 +317,16 @@ contract ERC1155Upgradeable is
         uint256[] memory ids,
         uint256[] memory amounts
     ) internal virtual {
-        require(from != address(0), "ERC1155: burn from the zero address");
-        require(ids.length == amounts.length, "ERC1155: ids and amounts length mismatch");
+        require(from != address(0), "ERC1155: burn from zero");
+        uint256 idsLength = ids.length; // cache length
+        require(idsLength == amounts.length, "ERC1155: length mismatch");
 
-        for (uint256 i = 0; i < ids.length; i++) {
+        for (uint256 i = 0; i < idsLength; i++) {
             uint256 id = ids[i];
             uint256 amount = amounts[i];
 
             uint256 fromBalance = _balances[id][from];
-            require(fromBalance >= amount, "ERC1155: burn amount exceeds balance");
+            require(fromBalance >= amount, "ERC1155: burn amount > balance");
             unchecked {
                 _balances[id][from] = fromBalance - amount;
             }

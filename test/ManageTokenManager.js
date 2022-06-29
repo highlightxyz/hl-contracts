@@ -1,7 +1,11 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-const { factorySetupCommunity } = require("../utils/test-utils");
+const { 
+    factorySetupCommunity,
+    deployCommunityFactory2,
+    deployGlobalBasicTokenManager
+} = require("../utils/test-utils");
 
 describe("Registering token manager", function () {
   let CommunityFactory;
@@ -34,15 +38,16 @@ describe("Registering token manager", function () {
     await beacon.deployed();  
     const minimalForwarder = await MinimalForwarder.deploy();
         await minimalForwarder.deployed();
-        factory = await CommunityFactory.deploy(
-            proxyAdminOwner.address,
+        factory = await deployCommunityFactory2(
+            proxyAdminOwner.address, 
             minimalForwarder.address,
             minimalForwarder.address,
             highlight.address,
             permissionsRegistryAdmin.address,
-            vault.address
+            vault.address,
+            [(await deployGlobalBasicTokenManager()).address],
+            highlightBeaconAdmin.address
         );
-    await factory.deployed();
   }); 
     
   beforeEach(async function () {
@@ -152,15 +157,16 @@ describe("Setting/unregistering token managers", function () {
         await beacon.deployed();  
         const minimalForwarder = await MinimalForwarder.deploy();
         await minimalForwarder.deployed();
-        factory = await CommunityFactory.deploy(
-            proxyAdminOwner.address,
+        factory = await deployCommunityFactory2(
+            proxyAdminOwner.address, 
             minimalForwarder.address,
             minimalForwarder.address,
             highlight.address,
             permissionsRegistryAdmin.address,
-            vault.address
+            vault.address,
+            [(await deployGlobalBasicTokenManager()).address],
+            highlightBeaconAdmin.address
         );
-        await factory.deployed();
     }); 
 
     beforeEach(async function () {
@@ -328,15 +334,16 @@ describe("Token manager management with tokens being managed and minted", functi
         await beacon.deployed();  
         const minimalForwarder = await MinimalForwarder.deploy();
         await minimalForwarder.deployed();
-        factory = await CommunityFactory.deploy(
-            proxyAdminOwner.address,
+        factory = await deployCommunityFactory2(
+            proxyAdminOwner.address, 
             minimalForwarder.address,
             minimalForwarder.address,
             highlight.address,
             permissionsRegistryAdmin.address,
-            vault.address
+            vault.address,
+            [(await deployGlobalBasicTokenManager()).address],
+            highlightBeaconAdmin.address
         );
-        await factory.deployed();
     });  
 
     beforeEach(async function () {

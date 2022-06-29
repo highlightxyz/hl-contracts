@@ -66,4 +66,3 @@ Fixing with linter:
 ```
 yarn lint:fix
 ```
-

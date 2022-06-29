@@ -43,7 +43,7 @@ contract TransferHooksTokenManager2 is TokenManager2, IPostSafeTransfer {
     function mintNewTokenToMultiple(
         address[] calldata to,
         uint256[] calldata amounts,
-        string memory uri,
+        string calldata uri,
         bool isMembership
     ) external override nonReentrant onlyPlatform returns (uint256 tokenId) {
         tokenId = _mintNewTokenToMultiple(to, amounts, uri, isMembership);
@@ -61,7 +61,7 @@ contract TransferHooksTokenManager2 is TokenManager2, IPostSafeTransfer {
         address to,
         uint256 id,
         uint256 amount,
-        bytes memory data
+        bytes calldata data
     ) external override nonReentrant onlyCommunity {
         postTransfers++;
         require(postTransfers < 5, "Too many transfers on token");
@@ -89,7 +89,7 @@ contract TransferHooksTokenManager2 is TokenManager2, IPostSafeTransfer {
     /**
      * @dev See {ITokenManager2-canMintExisting}
      */
-    function canMintExisting(address sender, uint256 tokenId, address[] calldata to, uint256[] calldata amounts, bytes memory data) external view returns (bool) {
+    function canMintExisting(address sender, uint256 tokenId, address[] calldata to, uint256[] calldata amounts, bytes calldata data) external view returns (bool) {
         return ICommunityAdmin(community).hasPlatformRole(sender);
     }
 
