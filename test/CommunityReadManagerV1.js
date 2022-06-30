@@ -3,7 +3,9 @@ const { ethers } = require("hardhat");
 const { 
     factorySetupCommunity,
     factoryDeployCommunity,
-    factoryDeployCommunityReadManager
+    factoryDeployCommunityReadManager,
+    deployCommunityFactory2,
+    deployGlobalBasicTokenManager,
 } = require("../utils/test-utils");
 
 describe("CommunityReadManagerV1", function () {
@@ -41,15 +43,16 @@ describe("CommunityReadManagerV1", function () {
         await beacon.deployed();  
         const minimalForwarder = await MinimalForwarder.deploy();
         await minimalForwarder.deployed();
-        factory = await CommunityFactory.deploy(
-            proxyAdminOwner.address,
+        factory = await deployCommunityFactory2(
+            proxyAdminOwner.address, 
             minimalForwarder.address,
             minimalForwarder.address,
             highlight.address,
             permissionsRegistryAdmin.address,
-            vault.address
+            vault.address,
+            [(await deployGlobalBasicTokenManager()).address],
+            highlightBeaconAdmin.address
         );
-        await factory.deployed();
     });
 
     describe("Setting community metadata", function () {

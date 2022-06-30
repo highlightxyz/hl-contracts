@@ -69,9 +69,9 @@ abstract contract TokenManager2 is ITokenManager2, ERC165, ReentrancyGuard {
      */
     function _mintNewTokensToOne(
         address to,
-        uint256[] memory amounts,
-        string[] memory uris,
-        bool[] memory isMembership
+        uint256[] calldata amounts,
+        string[] calldata uris,
+        bool[] calldata isMembership
     ) internal returns (uint256[] memory tokenIds) {
         tokenIds = ICommunity(community).managerMintNewToOne(to, amounts, uris, isMembership);
         emit MintedNewTokensToOne(tokenIds, to, msg.sender);
@@ -82,9 +82,9 @@ abstract contract TokenManager2 is ITokenManager2, ERC165, ReentrancyGuard {
      * @dev See {ITokenManager-mintNewTokenToMultiple}
      */
     function _mintNewTokenToMultiple(
-        address[] memory to,
-        uint256[] memory amounts,
-        string memory uri,
+        address[] calldata to,
+        uint256[] calldata amounts,
+        string calldata uri,
         bool isMembership
     ) internal returns (uint256 tokenId) {
         tokenId = ICommunity(community).managerMintNewToMultiple(to, amounts, uri, isMembership);

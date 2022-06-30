@@ -6,7 +6,9 @@ const {
     factorySetupCommunityWithRegisteredTM,
     DEFAULT_ADMIN_ROLE,
     OPENSEA_MAINNET_MARKETPLACE_POLYGON_ADDRESS,
-    getUserDefinedNonce
+    getUserDefinedNonce,
+    deployCommunityFactory2,
+    deployGlobalBasicTokenManager
 } = require("../utils/test-utils");
 
 const SplitMain = require("../artifacts/contracts/royalties/SplitMain.sol/SplitMain.json");
@@ -19,9 +21,11 @@ describe("Royalties", function () {
     let CommunityReadManager;
     let MockERC20;
     let MinimalForwarder;
+    let APIProxy;
     let beacon;
     let splitMain;
     let mockERC20;
+    let api;
 
     let highlight;
     let creatorA;
@@ -39,6 +43,7 @@ describe("Royalties", function () {
         CommunityReadManager = await ethers.getContractFactory("CommunityReadManagerV1");
         MockERC20 = await ethers.getContractFactory("MockERC20");
         MinimalForwarder = await ethers.getContractFactory("MinimalForwarder");
+        APIProxy = await ethers.getContractFactory("APIProxy");
 
         [highlight, creatorA, fanA, highlightBeaconAdmin, proxyAdminOwner, permissionsRegistryAdmin, vault, ...addrs] = await ethers.getSigners();
         
@@ -48,17 +53,20 @@ describe("Royalties", function () {
         await beacon.deployed();  
         const minimalForwarder = await MinimalForwarder.deploy();
         await minimalForwarder.deployed();
-        factory = await CommunityFactory.deploy(
-            proxyAdminOwner.address,
+        factory = await deployCommunityFactory2(
+            proxyAdminOwner.address, 
             minimalForwarder.address,
             minimalForwarder.address,
             highlight.address,
             permissionsRegistryAdmin.address,
-            vault.address
+            vault.address,
+            [(await deployGlobalBasicTokenManager()).address],
+            highlightBeaconAdmin.address
         );
-        await factory.deployed();
         mockERC20 = await MockERC20.deploy("Mock", "MK", [highlight.address, creatorA.address, fanA.address, highlightBeaconAdmin.address, addrs[0].address]);
         await mockERC20.deployed();
+        api = await APIProxy.deploy(await factory.splitMain())
+        await api.deployed();
 
         splitMain = new ethers.Contract(await factory.splitMain(), SplitMainABI, highlight);
 
@@ -761,4 +769,135 @@ describe("Royalties", function () {
             })
         })
     })
+
+    describe("APIProxy", function () {
+        let split;
+        let community;
+
+        beforeEach(async function () {
+            const { deployedCommunity: setupCommunity } = await factorySetupCommunity(highlight, factory, beacon, creatorA.address, highlight.address, highlight.address, addrs[0], "Test", "Test uri");
+            fullySetupCommunity = setupCommunity
+
+            split = await fullySetupCommunity.royaltySplit()
+            splitMain = splitMain.connect(highlight)
+
+            // send ETH and ERC20 to the split
+            const ethTx = await fanA.sendTransaction({
+                to: split,
+                value: ethers.utils.parseEther("1.0")
+            })
+            await ethTx.wait();
+
+            mockERC20 = mockERC20.connect(fanA)
+            const erc20Tx = await mockERC20.transferFrom(fanA.address, split, 100);
+            await erc20Tx.wait();
+
+            const updateSplitTx = await splitMain.updateSplit(
+                split, 
+                { ...defaultSplit, secondaryAccounts: [addrs[0].address], secondaryAllocations: [700000] } 
+            );
+            await updateSplitTx.wait();
+            const updatePrimaryControllerTx = await splitMain.grantPrimaryController(split, addrs[1].address);
+            await updatePrimaryControllerTx.wait();
+        })
+
+        describe("Withdraw by APIProxy", function () {
+            it("withdrawRoyaltiesOwedForUserOnCommunity works as expected", async function () {
+                // check amounts before for all recipients
+                expect(await api.getERC20RoyaltiesOwedForUserOnCommunity(fullySetupCommunity.address, mockERC20.address, addrs[0].address))
+                    .to.eql([ethers.BigNumber.from(0), ethers.BigNumber.from(70)])
+                expect(await api.getNativeRoyaltiesOwedForUserOnCommunity(fullySetupCommunity.address, addrs[0].address))
+                    .to.eql([ethers.BigNumber.from(0), ethers.BigNumber.from("700000000000000000")])
+                expect(await api.getERC20RoyaltiesOwedForUserOnCommunity(fullySetupCommunity.address, mockERC20.address, addrs[1].address))
+                    .to.eql([ethers.BigNumber.from(0), ethers.BigNumber.from(30)])
+                expect(await api.getNativeRoyaltiesOwedForUserOnCommunity(fullySetupCommunity.address, addrs[1].address))
+                    .to.eql([ethers.BigNumber.from(0), ethers.BigNumber.from("300000000000000000")])
+                expect(await api.getERC20RoyaltiesOwedForAllRecipientsOnCommunity(fullySetupCommunity.address, mockERC20.address))
+                    .to.eql([
+                        [addrs[0].address, addrs[1].address], 
+                        [ethers.BigNumber.from(0), ethers.BigNumber.from(0)], 
+                        [ethers.BigNumber.from(70), ethers.BigNumber.from(30)]
+                    ])
+                expect(await api.getNativeRoyaltiesOwedForAllRecipientsOnCommunity(fullySetupCommunity.address))
+                    .to.eql([
+                        [addrs[0].address, addrs[1].address], 
+                        [ethers.BigNumber.from(0), ethers.BigNumber.from(0)], 
+                        [ethers.BigNumber.from("700000000000000000"), ethers.BigNumber.from("300000000000000000")]
+                    ])
+
+                await expect(api.withdrawRoyaltiesOwedForUserOnCommunity(fullySetupCommunity.address, addrs[0].address, [mockERC20.address]))
+
+                // check amounts after for all recipients 
+                expect(await api.getERC20RoyaltiesOwedForUserOnCommunity(fullySetupCommunity.address, mockERC20.address, addrs[0].address))
+                    .to.eql([ethers.BigNumber.from(0), ethers.BigNumber.from(0)])
+                expect(await api.getNativeRoyaltiesOwedForUserOnCommunity(fullySetupCommunity.address, addrs[0].address))
+                    .to.eql([ethers.BigNumber.from(0), ethers.BigNumber.from(0)])
+                expect(await api.getERC20RoyaltiesOwedForUserOnCommunity(fullySetupCommunity.address, mockERC20.address, addrs[1].address))
+                    .to.eql([ethers.BigNumber.from(29), ethers.BigNumber.from(0)])
+                expect(await api.getNativeRoyaltiesOwedForUserOnCommunity(fullySetupCommunity.address, addrs[1].address))
+                    .to.eql([ethers.BigNumber.from("300000000000000000"), ethers.BigNumber.from(0)])
+                expect(await api.getERC20RoyaltiesOwedForAllRecipientsOnCommunity(fullySetupCommunity.address, mockERC20.address))
+                    .to.eql([
+                        [addrs[0].address, addrs[1].address], 
+                        [ethers.BigNumber.from(0), ethers.BigNumber.from(29)], 
+                        [ethers.BigNumber.from(0), ethers.BigNumber.from(0)]
+                    ])
+                expect(await api.getNativeRoyaltiesOwedForAllRecipientsOnCommunity(fullySetupCommunity.address))
+                    .to.eql([
+                        [addrs[0].address, addrs[1].address], 
+                        [ethers.BigNumber.from(0), ethers.BigNumber.from("300000000000000000")], 
+                        [ethers.BigNumber.from(0), ethers.BigNumber.from(0)]
+                    ]) 
+            })
+
+            it("withdrawRoyaltiesOwedForAllRecipientsOnCommunity works as expected", async function () {
+                // check amounts before for all recipients
+                expect(await api.getERC20RoyaltiesOwedForAllRecipientsOnCommunity(fullySetupCommunity.address, mockERC20.address))
+                    .to.eql([
+                        [addrs[0].address, addrs[1].address], 
+                        [ethers.BigNumber.from(0), ethers.BigNumber.from(29)], 
+                        [ethers.BigNumber.from(70), ethers.BigNumber.from(30)]
+                    ])
+                expect(await api.getNativeRoyaltiesOwedForAllRecipientsOnCommunity(fullySetupCommunity.address))
+                    .to.eql([
+                        [addrs[0].address, addrs[1].address], 
+                        [ethers.BigNumber.from(0), ethers.BigNumber.from("300000000000000000")], 
+                        [ethers.BigNumber.from("700000000000000000"), ethers.BigNumber.from("300000000000000000")]
+                    ])
+                
+                await expect(api.withdrawRoyaltiesOwedForAllRecipientsOnCommunity(fullySetupCommunity.address, [mockERC20.address]))
+
+                // check amounts after for all recipients 
+                expect(await api.getERC20RoyaltiesOwedForAllRecipientsOnCommunity(fullySetupCommunity.address, mockERC20.address))
+                    .to.eql([
+                        [addrs[0].address, addrs[1].address], 
+                        [ethers.BigNumber.from(0), ethers.BigNumber.from(0)], 
+                        [ethers.BigNumber.from(0), ethers.BigNumber.from(0)]
+                    ])
+                expect(await api.getNativeRoyaltiesOwedForAllRecipientsOnCommunity(fullySetupCommunity.address))
+                    .to.eql([
+                        [addrs[0].address, addrs[1].address], 
+                        [ethers.BigNumber.from(0), ethers.BigNumber.from(0)], 
+                        [ethers.BigNumber.from(0), ethers.BigNumber.from(0)]
+                    ])
+            })
+        })
+
+        describe("APIProxy getter", function () {             
+            it("_getUniqueRecipients and _getAccountSplitTotalPercentage internal function works as expected", async function () {
+                splitMain = splitMain.connect(addrs[0])
+                await expect(splitMain.updateSplit(
+                    split, 
+                    { ...defaultSplit, secondaryAccounts: [addrs[0].address, addrs[1].address, fanA.address], secondaryAllocations: [100000, 100000, 500000] } 
+                )).to.emit(splitMain, "UpdateSplit").withArgs(split);
+
+                expect(await api.getERC20RoyaltiesOwedForAllRecipientsOnCommunity(fullySetupCommunity.address, mockERC20.address))
+                    .to.eql([
+                        [addrs[0].address, addrs[1].address, fanA.address], 
+                        [ethers.BigNumber.from(0), ethers.BigNumber.from(0), ethers.BigNumber.from(0)], 
+                        [ethers.BigNumber.from(10), ethers.BigNumber.from(40), ethers.BigNumber.from(50)]
+                    ])
+            })
+        })
+    });
 });

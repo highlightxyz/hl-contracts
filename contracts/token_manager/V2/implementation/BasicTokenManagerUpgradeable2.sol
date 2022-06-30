@@ -33,7 +33,7 @@ contract BasicTokenManagerUpgradeable2 is TokenManagerUpgradeable2 {
     function mintNewTokenToMultiple(
         address[] calldata to,
         uint256[] calldata amounts,
-        string memory uri,
+        string calldata uri,
         bool isMembership
     ) external override nonReentrant onlyPlatform returns (uint256 tokenId) {
         tokenId = _mintNewTokenToMultiple(to, amounts, uri, isMembership);
@@ -63,7 +63,7 @@ contract BasicTokenManagerUpgradeable2 is TokenManagerUpgradeable2 {
     /**
      * @dev See {ITokenManager2-canMintExisting}
      */
-    function canMintExisting(address sender, uint256 tokenId, address[] calldata to, uint256[] calldata amounts, bytes memory data) external view returns (bool) {
+    function canMintExisting(address sender, uint256 tokenId, address[] calldata to, uint256[] calldata amounts, bytes calldata data) external view returns (bool) {
         return ICommunityAdmin(community).hasPlatformRole(sender);
     }
 

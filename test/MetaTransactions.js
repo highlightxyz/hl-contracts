@@ -1,7 +1,12 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
-const { factorySetupCommunityWithRegisteredTM } = require("../utils/test-utils");
-const { signMetaTxRequest, MINIMAL_FORWARDER_GAS_UNIT_CONSUMPTION } = require("../utils/test-utils.js");
+const { 
+    factorySetupCommunityWithRegisteredTM,
+    deployCommunityFactory2,
+    deployGlobalBasicTokenManager,
+    sign2771MetaTxRequest, 
+    MINIMAL_FORWARDER_GAS_UNIT_CONSUMPTION
+} = require("../utils/test-utils");
 
 const ISplitMain = require("../artifacts/contracts/royalties/interfaces/ISplitMain.sol/ISplitMain.json");
 const ISplitMainABI = ISplitMain["abi"];
@@ -38,15 +43,16 @@ describe("Meta Transactions", function () {
         await beacon.deployed();  
         minimalForwarder = await MinimalForwarder.deploy();
         await minimalForwarder.deployed();
-        factory = await CommunityFactory.deploy(
+        factory = await deployCommunityFactory2(
             proxyAdminOwner.address, 
             minimalForwarder.address,
             minimalForwarder.address,
             highlight.address,
             permissionsRegistryAdmin.address,
-            vault.address
+            vault.address,
+            [(await deployGlobalBasicTokenManager()).address],
+            highlightBeaconAdmin.address
         );
-        await factory.deployed();
     });
 
     beforeEach(async function () {
@@ -73,7 +79,7 @@ describe("Meta Transactions", function () {
 
     describe("MinimalForwarder", function () {
         it("Not encoding enough gas for an operation fails the operation", async function () {
-            const { signature, request } = await signMetaTxRequest(creatorA, minimalForwarder, {
+            const { signature, request } = await sign2771MetaTxRequest(creatorA, minimalForwarder, {
                 from: creatorA.address,
                 to: community.address,
                 gas: 46200,
@@ -89,7 +95,7 @@ describe("Meta Transactions", function () {
         })
 
         it("Mismatched signers from the from address of a request are not allowed", async function () {
-            const { signature, request } = await signMetaTxRequest(creatorA, minimalForwarder, {
+            const { signature, request } = await sign2771MetaTxRequest(creatorA, minimalForwarder, {
                 from: defaultAdmin.address,
                 to: community.address,
                 gas: 60000,
@@ -105,7 +111,7 @@ describe("Meta Transactions", function () {
         })
 
         it("Mismatched data in a request is not allowed", async function () {
-            const { signature, request } = await signMetaTxRequest(creatorA, minimalForwarder, {
+            const { signature, request } = await sign2771MetaTxRequest(creatorA, minimalForwarder, {
                 from: creatorA.address,
                 to: community.address,
                 gas: 60000,
@@ -127,7 +133,7 @@ describe("Meta Transactions", function () {
             await newMinimalForwarder.deployed();
 
             // this operation would have succeeded from the trusted forwarder, but since it's not trusted, the 
-            const { signature, request } = await signMetaTxRequest(creatorA, newMinimalForwarder, {
+            const { signature, request } = await sign2771MetaTxRequest(creatorA, newMinimalForwarder, {
                 from: creatorA.address,
                 to: community.address,
                 gas: 50000,
@@ -145,7 +151,7 @@ describe("Meta Transactions", function () {
 
     describe("Community", function () {
         it("Setting royalty split with meta-transactions works as expected (including expected failures)", async function () {
-            const { signature, request } = await signMetaTxRequest(defaultAdmin, minimalForwarder, {
+            const { signature, request } = await sign2771MetaTxRequest(defaultAdmin, minimalForwarder, {
                 from: defaultAdmin.address,
                 to: community.address,
                 gas: MINIMAL_FORWARDER_GAS_UNIT_CONSUMPTION,
@@ -160,7 +166,7 @@ describe("Meta Transactions", function () {
                 .to.emit(community, "RoyaltyCutSet")
                 .withArgs(1000, 100);
 
-            const { signature: signature2, request: request2 } = await signMetaTxRequest(creatorA, minimalForwarder, {
+            const { signature: signature2, request: request2 } = await sign2771MetaTxRequest(creatorA, minimalForwarder, {
                 from: creatorA.address,
                 to: community.address,
                 gas: MINIMAL_FORWARDER_GAS_UNIT_CONSUMPTION,
@@ -182,7 +188,7 @@ describe("Meta Transactions", function () {
         })
 
         it("Managing token managers with meta-transactions works as expected (including expected failures)", async function () {
-            const { signature, request } = await signMetaTxRequest(creatorA, minimalForwarder, {
+            const { signature, request } = await sign2771MetaTxRequest(creatorA, minimalForwarder, {
                 from: creatorA.address,
                 to: community.address,
                 gas: MINIMAL_FORWARDER_GAS_UNIT_CONSUMPTION,
@@ -197,7 +203,7 @@ describe("Meta Transactions", function () {
                 .to.emit(community, "TokenManagerUnregistered")
                 .withArgs(ethers.utils.getAddress(basicTm.address), ethers.utils.getAddress(creatorA.address));
 
-            const { signature: signature2, request: request2 } = await signMetaTxRequest(fanA, minimalForwarder, {
+            const { signature: signature2, request: request2 } = await sign2771MetaTxRequest(fanA, minimalForwarder, {
                 from: fanA.address,
                 to: community.address,
                 gas: MINIMAL_FORWARDER_GAS_UNIT_CONSUMPTION,
@@ -221,7 +227,7 @@ describe("Meta Transactions", function () {
 
     describe("SplitMain", function () {
         it("Managing primary controller for a split with meta-transactions works as expected (including expected failures)", async function () {
-            const { signature, request } = await signMetaTxRequest(defaultAdmin, minimalForwarder, {
+            const { signature, request } = await sign2771MetaTxRequest(defaultAdmin, minimalForwarder, {
                 from: defaultAdmin.address,
                 to: splitMain.address,
                 gas: MINIMAL_FORWARDER_GAS_UNIT_CONSUMPTION,
@@ -235,7 +241,7 @@ describe("Meta Transactions", function () {
             await expect(minimalForwarder.execute(request, signature))
                 .to.emit(splitMain, "NewPrimaryController")
 
-            const { signature: signature2, request: request2 } = await signMetaTxRequest(fanA, minimalForwarder, {
+            const { signature: signature2, request: request2 } = await sign2771MetaTxRequest(fanA, minimalForwarder, {
                 from: fanA.address,
                 to: splitMain.address,
                 gas: MINIMAL_FORWARDER_GAS_UNIT_CONSUMPTION,
@@ -256,7 +262,7 @@ describe("Meta Transactions", function () {
         })
 
         it("Managing secondary controllers for a split with meta-transactions works as expected (including expected failures)", async function () {
-            const { signature, request } = await signMetaTxRequest(addrs[0], minimalForwarder, {
+            const { signature, request } = await sign2771MetaTxRequest(addrs[0], minimalForwarder, {
                 from: addrs[0].address,
                 to: splitMain.address,
                 gas: MINIMAL_FORWARDER_GAS_UNIT_CONSUMPTION,
@@ -270,7 +276,7 @@ describe("Meta Transactions", function () {
             await expect(minimalForwarder.execute(request, signature))
                 .to.emit(splitMain, "NewSecondaryController")
 
-            const { signature: signature2, request: request2 } = await signMetaTxRequest(defaultAdmin, minimalForwarder, {
+            const { signature: signature2, request: request2 } = await sign2771MetaTxRequest(defaultAdmin, minimalForwarder, {
                 from: defaultAdmin.address,
                 to: splitMain.address,
                 gas: MINIMAL_FORWARDER_GAS_UNIT_CONSUMPTION,

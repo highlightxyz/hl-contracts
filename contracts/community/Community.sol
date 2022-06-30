@@ -10,6 +10,7 @@ import "../utils/SafeMathUpgradeable.sol";
 
 import "./interfaces/ICommunity.sol";
 import "../token_manager/V2/interfaces/ITokenManager2.sol";
+import "../token_manager/interfaces/IGlobalTokenManager.sol";
 
 /**
  * @title Highlight community
@@ -76,26 +77,15 @@ abstract contract Community is ERC165Upgradeable, ICommunity, ReentrancyGuardUpg
      * @dev See {ICommunity-tokenManagerBatch}
      */
     function tokenManagerBatch(uint256[] calldata tokenIds) external view override returns (address[] memory) {
-        address[] memory tokenManagersBatch = new address[](tokenIds.length);
+        // cache length
+        uint256 idLength = tokenIds.length;
+        address[] memory tokenManagersBatch = new address[](idLength);
 
-        for (uint256 i = 0; i < tokenIds.length; i++) {
+        for (uint256 i = 0; i < idLength; i++) {
             tokenManagersBatch[i] = _tokenToManager[tokenIds[i]];
         }
 
         return tokenManagersBatch;
-    }
-
-    /**
-     * @dev See {ICommunity-uriBatch}
-     */
-    function uriBatch(uint256[] calldata tokenIds) external view override returns (string[] memory) {
-        string[] memory urisBatch = new string[](tokenIds.length);
-
-        for (uint256 i = 0; i < tokenIds.length; i++) {
-            urisBatch[i] = _tokenURI[tokenIds[i]];
-        }
-
-        return urisBatch;
     }
 
     /**
@@ -113,10 +103,15 @@ abstract contract Community is ERC165Upgradeable, ICommunity, ReentrancyGuardUpg
     function _registerTokenManager(address tokenManager, address sender) internal {
         require(tokenManager != address(this), "Invalid address");
         require(tokenManager.isContract(), "Not contract");
-        require(tokenManager.supportsInterface(type(ITokenManager2).interfaceId), "Not token manager");
-        require(!_tokenManagers.contains(tokenManager), "Already registered");
+        require(
+            tokenManager.supportsInterface(type(ITokenManager2).interfaceId) ||
+                tokenManager.supportsInterface(type(IGlobalTokenManager).interfaceId),
+            "Not token manager"
+        );
 
-        _tokenManagers.add(tokenManager);
+        // registration happens here
+        require(_tokenManagers.add(tokenManager), "Already registered");
+
         emit TokenManagerRegistered(tokenManager, sender);
     }
 
@@ -133,5 +128,13 @@ abstract contract Community is ERC165Upgradeable, ICommunity, ReentrancyGuardUpg
     ) internal {
         _tokenToManager[tokenId] = _tokenManager;
         emit TokenManagerSet(tokenId, _tokenManager, sender);
+    }
+
+    /**
+     * @dev Returns true if the token manager is a global one
+     * @param tokenManager The token manager being checked
+     */
+    function _isGlobalTokenManager(address tokenManager) internal view returns (bool) {
+        return IERC165Upgradeable(tokenManager).supportsInterface(type(IGlobalTokenManager).interfaceId);
     }
 }

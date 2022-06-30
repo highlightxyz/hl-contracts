@@ -15,6 +15,9 @@ const BasicTokenManagerABI = BasicTokenManager["abi"];
 const CommunityReadManagerV1 = require("../artifacts/contracts/community/implementation/CommunityReadManagerV1.sol/CommunityReadManagerV1.json");
 const CommunityReadManagerV1ABI = CommunityReadManagerV1["abi"];
 
+const IGlobalTokenManager = require("../artifacts/contracts/token_manager/interfaces/IGlobalTokenManager.sol/IGlobalTokenManager.json");
+const IGlobalTokenManagerABI = IGlobalTokenManager["abi"]
+
 // increment on each deploy to avoid Create2 errors on tests. For normal usage, stick with USER_DEFINED_NONCE as 1 by default
 let USER_DEFINED_NONCE = 1;
 
@@ -48,6 +51,20 @@ async function factorySetupCommunityWithRegisteredTM(signer, factory, beacon, cr
   USER_DEFINED_NONCE++;
 
   return processReceipt(receipt, signer);
+}
+
+async function factorySetupCommunityWithGlobalDefaultTMs(signer, factory, beacon, creatorAdmin, defaultAdmin, owner, royaltySecondaryController, communityName, contractURI) {  
+  const tx = await factory.setupCommunityWithGlobalDefaultTokenManagers(beacon.address, creatorAdmin, defaultAdmin, owner, royaltySecondaryController.address, communityName, contractURI, USER_DEFINED_NONCE);
+  const receipt = await tx.wait();
+
+  USER_DEFINED_NONCE++;
+
+  const { deployedCommunity, deployedCommunityReadManager } = processReceipt(receipt, signer);
+  return {
+    deployedCommunity, 
+    deployedCommunityReadManager,
+    globalTms: (await factory.getDefaultRegisteredTokenManagers()).map(tokenManagerAddress => new ethers.Contract(tokenManagerAddress, IGlobalTokenManagerABI, signer))
+  }
 }
 
 async function factorySetupCommunityWithClone(signer, factory, beacon, creatorAdmin, defaultAdmin, owner, royaltySecondaryController, communityName, contractURI) {
@@ -118,6 +135,61 @@ function incrementUserDefinedNonce() {
   USER_DEFINED_NONCE++;
 }
 
+async function deployCommunityFactory2(
+  proxyAdminOwner,
+  splitMainTrustedForwarder, 
+  _communityTrustedForwarder,
+  initialPlatformExecutor,
+  permissionsRegistryAdmin,
+  platformVault,
+  defaultRegisteredTokenManagers,
+  initialFactoryOwner
+) {
+  const OldCommunityFactory = await ethers.getContractFactory("CommunityFactory");
+  const CommunityFactory = await ethers.getContractFactory("CommunityFactoryV2");
+
+  const oldFactory = await OldCommunityFactory.deploy(
+    proxyAdminOwner,
+    splitMainTrustedForwarder, 
+    _communityTrustedForwarder,
+    initialPlatformExecutor,
+    permissionsRegistryAdmin,
+    platformVault
+  );
+  await oldFactory.deployed();
+
+  const splitMainAddress = await oldFactory.splitMain();
+  const proxyAdminAddress = await oldFactory.proxyAdmin();
+  const permissionsRegistryAddress = await oldFactory.permissionsRegistry();
+  const communityTrustedForwarderAddress =await oldFactory.communityTrustedForwarder();
+
+  const factory = await CommunityFactory.deploy(
+    initialFactoryOwner,
+    splitMainAddress,
+    proxyAdminAddress,
+    permissionsRegistryAddress,
+    communityTrustedForwarderAddress,
+    defaultRegisteredTokenManagers
+  )
+  await factory.deployed();
+
+  return factory;
+}
+
+async function deployGlobalBasicTokenManager() {
+  const GlobalBasicTokenManager = await ethers.getContractFactory("GlobalBasicTokenManager");
+  const globalBasicTokenManager = await GlobalBasicTokenManager.deploy();
+  await globalBasicTokenManager.deployed();
+  return globalBasicTokenManager;
+}
+
+async function deployNonTransferableTokenManager() {
+  const NonTransferableTokenManager = await ethers.getContractFactory("NonTransferableTokenManager");
+  const nonTransferableTokenManager = await NonTransferableTokenManager.deploy();
+  await nonTransferableTokenManager.deployed();
+  return nonTransferableTokenManager;
+}
+
 // metatx utilities replicated here for public release
 
 const MINIMAL_FORWARDER_GAS_UNIT_CONSUMPTION = 100000;
@@ -130,8 +202,14 @@ const ForwardRequest = [
     { name: 'nonce', type: 'uint256' },
     { name: 'data', type: 'bytes' },
 ];
+
+const MetaTransaction = [
+  { name: 'nonce', type: 'uint256' },
+  { name: 'from', type: 'address' },
+  { name: 'functionSignature', type: 'bytes' }
+];
   
-function getMetaTxTypeData(chainId, verifyingContract) {
+function get2771MetaTxTypeData(chainId, verifyingContract) {
     return {
         types: {
            // EIP712Domain, do not pass EIP712Domain type into ethers, it will pre-compute for us
@@ -147,14 +225,14 @@ function getMetaTxTypeData(chainId, verifyingContract) {
     }
 };
   
-async function buildRequest(forwarder, input) {
+async function build2771Request(forwarder, input) {
     const nonce = await forwarder.getNonce(input.from).then(nonce => nonce.toString());
     return { value: 0, nonce, ...input };
 }
   
-async function buildTypedData(forwarder, request) {
+async function build2771TypedData(forwarder, request) {
     const chainId = await forwarder.provider.getNetwork().then(n => n.chainId);
-    const typeData = getMetaTxTypeData(chainId, forwarder.address);
+    const typeData = get2771MetaTxTypeData(chainId, forwarder.address);
     return { ...typeData, message: request };
 }
   
@@ -166,11 +244,105 @@ async function buildTypedData(forwarder, request) {
     data // encoded function call on contract with arguments
 }
 */
-async function signMetaTxRequest(signer, forwarder, input) {
-    const request = await buildRequest(forwarder, input);
-    const toSign = await buildTypedData(forwarder, request);
+async function sign2771MetaTxRequest(signer, forwarder, input) {
+    const request = await build2771Request(forwarder, input);
+    const toSign = await build2771TypedData(forwarder, request);
     const signature = await signer._signTypedData(toSign.domain, toSign.types, toSign.message);
     return { signature, request };
+}
+
+class WETHMetaTx {
+  constructor(contract) {
+    this.contract = contract;
+    this.META_TRANSACTION_TYPEHASH =
+      ethers.utils.keccak256(ethers.utils.toUtf8Bytes("MetaTransaction(uint256 nonce,address from,bytes functionSignature)"));
+    this.EIP712_DOMAIN_TYPEHASH = 
+      ethers.utils.keccak256(ethers.utils.toUtf8Bytes("EIP712Domain(string name,string version,address verifyingContract,bytes32 salt)"))
+  }
+
+  getWETHMetaTxTypeData() {
+    return {
+      types: {
+         // EIP712Domain, do not pass EIP712Domain type into ethers, it will pre-compute for us
+          MetaTransaction,
+      },
+      domain: {
+          name: 'Wrapped Ether',
+          version: '1',
+          verifyingContract: this.contract.address,
+          salt: this.chainIdBytes
+      },
+      primaryType: 'MetaTransaction',
+    }
+  } 
+
+  async buildWETHMetaTransaction(from, functionSignature, nonce) {
+    if (!nonce) {
+      nonce = await this.contract.getNonce(from).then(nonce => nonce.toString());
+    } else {
+      nonce = nonce.toString();
+    }
+    return { nonce, from, functionSignature };
+  }
+  
+  async buildWETHTypedData(metaTx) {
+    this.chainIdBytes = ethers.utils.hexZeroPad(ethers.utils.hexlify(await this.contract.provider.getNetwork().then(n => n.chainId)), 32);
+    const typeData = this.getWETHMetaTxTypeData();
+    return { ...typeData, message: metaTx };
+  }
+  
+  async signWETHMetaTxRequest(signer, from, functionSignature, nonce = undefined) {
+    const metaTx = await this.buildWETHMetaTransaction(from, functionSignature, nonce);
+    const toSign = await this.buildWETHTypedData(metaTx);
+    const signature = await signer._signTypedData(toSign.domain, toSign.types, toSign.message);
+    const { r, s, v } = ethers.utils.splitSignature(signature);
+    return { functionSignature, sigR: r, sigS: s, sigV: v };
+  }
+  
+  verify(signer, metaTx, signature) {
+    const recoveredSigner = this.ecrecover(this.toTypedMessageHash(this.hashMetaTransaction(metaTx)), signature);
+    return signer == recoveredSigner;
+  }
+  
+  hashMetaTransaction(metaTx) {
+    const hashedMetaTx = ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+        ["bytes32", "uint256", "address", "bytes32"],
+        [this.META_TRANSACTION_TYPEHASH, parseInt(metaTx.nonce), metaTx.from, ethers.utils.keccak256(metaTx.functionSignature)]
+      )
+    )
+  
+    return hashedMetaTx;
+  }
+  
+  toTypedMessageHash(hashedMetaTx) {
+    const typedMessageHash = ethers.utils.keccak256(
+      ethers.utils.solidityPack(["string", "bytes32", "bytes32"], ["\x19\x01", this.getDomainSeperator(), hashedMetaTx])
+    )
+  
+    return typedMessageHash;
+  }
+  
+  getDomainSeperator() {
+    const domainSeperator = ethers.utils.keccak256(
+      ethers.utils.defaultAbiCoder.encode(
+        ["bytes32", "bytes32", "bytes32", "address", "bytes32"],
+        [
+          this.EIP712_DOMAIN_TYPEHASH, 
+          ethers.utils.keccak256(ethers.utils.toUtf8Bytes("Wrapped Ether")),
+          ethers.utils.keccak256(ethers.utils.toUtf8Bytes("1")),
+          this.contract.address,
+          this.chainIdBytes
+        ]
+      )
+    )
+  
+    return domainSeperator;
+  }
+  
+  ecrecover(typedMessageHash, signature) {
+    return ethers.utils.recoverAddress(typedMessageHash, signature);
+  }  
 }
 
 module.exports = {
@@ -178,9 +350,13 @@ module.exports = {
     factorySetupCommunity,
     factorySetupCommunityWithClone,
     factorySetupCommunityWithRegisteredTM,
+    factorySetupCommunityWithGlobalDefaultTMs,
     factorySetupCommunityWithRegisteredClone,
     factoryDeployCommunity,
     factoryDeployCommunityReadManager,
+    deployCommunityFactory2,
+    deployGlobalBasicTokenManager, 
+    deployNonTransferableTokenManager,
     DEFAULT_ADMIN_ROLE,
     PLATFORM_ROLE,
     COMMUNITY_ADMIN_ROLE,
@@ -189,7 +365,8 @@ module.exports = {
     EIP1967ImplementationStorageSlot,
     getUserDefinedNonce,
     incrementUserDefinedNonce,
-    signMetaTxRequest,
+    sign2771MetaTxRequest,
+    WETHMetaTx,
     MINIMAL_FORWARDER_GAS_UNIT_CONSUMPTION, 
     COMMUNITY_DEPLOYED_TOPIC_HASH,
     TOKEN_MANAGER_DEPLOYED_TOPIC_HASH
