@@ -5,14 +5,16 @@ pragma solidity 0.8.10;
 import "../permissions_registry/IPermissionsRegistry.sol";
 import "../metatx/IMinimalForwarder.sol";
 import "../metatx/INativeMetaTransaction.sol";
+import "../utils/ERC1155/IERC1155Upgradeable.sol";
 
 import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 /**
  * @title Highlight central payments manager
  * @author ishan@highlight.xyz
  */
-contract CentralPaymentsManager {
+contract CentralPaymentsManager is ReentrancyGuard {
     /**
      * @dev Packet enabling impersonation of purchaser for currency
      */
@@ -21,6 +23,18 @@ contract CentralPaymentsManager {
         bytes32 sigR;
         bytes32 sigS;
         uint8 sigV;
+    }
+
+    /**
+     * @dev Defines community tokens being purchased
+     */
+    struct SaleItem {
+        uint256[] tokenIds;
+        uint256[] amounts;
+        uint256 price;
+        address community;
+        address vault;
+        bytes transferData;
     }
 
     /**
@@ -94,7 +108,7 @@ contract CentralPaymentsManager {
         PurchaserMetaTxPacket calldata purchaseToPlatformPacket,
         uint256 price, // only used for emitting sale data (instead of extracting from packets)
         uint256[] calldata tokenIds // only used for emitting sale data (instead of extracting from packets)
-    ) external onlyPlatformExecutor currencyWhitelisted(currency) {
+    ) external onlyPlatformExecutor currencyWhitelisted(currency) nonReentrant {
         // transfer price amount of currency by hitting executeMetaTx on currency contract
         // the amount should be computed properly off-chain
         // transfer 97% to the creator
@@ -120,5 +134,53 @@ contract CentralPaymentsManager {
 
         // emit sale params
         emit CentralSale(communityTokenTransferReq.to, purchaser, currency, price, tokenIds);
+    }
+
+    /**
+     * @dev Purchase community tokens by sending payment to creator + platform, then by impersonating executor to transfer community tokens.
+     * @param currency The ERC20 currency that the purchaser is paying in. Has to support meta transactions.
+     * @param purchaser The purchaser
+     * @param saleItem Defines what community tokens are being purchased
+     * @param purchaseToCreatorPacket Meta tx packet containing call to send portion of purchase to creator
+     * @param purchaseToPlatformPacket Meta tx packet containing call to send portion of purchase to platform
+     */
+    function purchaseTokenWithMetaTxSupportedCurrencyAndPermissionedExecutor(
+        address currency,
+        address purchaser,
+        SaleItem calldata saleItem,
+        PurchaserMetaTxPacket calldata purchaseToCreatorPacket,
+        PurchaserMetaTxPacket calldata purchaseToPlatformPacket
+    ) external onlyPlatformExecutor currencyWhitelisted(currency) nonReentrant {
+        // transfer price amount of currency by hitting executeMetaTx on currency contract
+        // the amount should be computed properly off-chain
+        // transfer 97% to the creator
+        INativeMetaTransaction(currency).executeMetaTransaction(
+            purchaser,
+            purchaseToCreatorPacket.functionSignature,
+            purchaseToCreatorPacket.sigR,
+            purchaseToCreatorPacket.sigS,
+            purchaseToCreatorPacket.sigV
+        );
+
+        // transfer 3% to the vault
+        INativeMetaTransaction(currency).executeMetaTransaction(
+            purchaser,
+            purchaseToPlatformPacket.functionSignature,
+            purchaseToPlatformPacket.sigR,
+            purchaseToPlatformPacket.sigS,
+            purchaseToPlatformPacket.sigV
+        );
+
+        // transfer tokenAmounts of tokenIds on community
+        IERC1155Upgradeable(saleItem.community).safeBatchTransferFrom(
+            saleItem.vault,
+            purchaser,
+            saleItem.tokenIds,
+            saleItem.amounts,
+            saleItem.transferData
+        );
+
+        // emit sale params
+        emit CentralSale(saleItem.community, purchaser, currency, saleItem.price, saleItem.tokenIds);
     }
 }
