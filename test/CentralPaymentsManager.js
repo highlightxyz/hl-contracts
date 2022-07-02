@@ -27,6 +27,7 @@ describe("CentralPaymentsManager", function () {
     let basicTm;
     let weth;
     let centralPaymentsManager;
+    let permissionsRegistry;
 
     let wethMetaTx;
 
@@ -66,7 +67,7 @@ describe("CentralPaymentsManager", function () {
         // deploy weth, fanA will start with 100 wETH, also whitelist wETH on permissions registry
         weth = await WETH.deploy(highlightBeaconAdmin.address);
         await weth.deployed();
-        const permissionsRegistry = new ethers.Contract(await factory.permissionsRegistry(), IPermissionsRegistryABI, permissionsRegistryAdmin);
+        permissionsRegistry = new ethers.Contract(await factory.permissionsRegistry(), IPermissionsRegistryABI, permissionsRegistryAdmin);
         const tx = await permissionsRegistry.whitelistCurrency(weth.address);
         await tx.wait();
 
@@ -97,7 +98,7 @@ describe("CentralPaymentsManager", function () {
         basicTm = deployedBasicTm
     })
 
-    describe("Purchase", function () {
+    describe("Purchase with minimal forwarder", function () {
         it("Platform executor should be able to execute a well-formed and signed purchase", async function () {
             const listing = {
                 community, 
@@ -125,7 +126,7 @@ describe("CentralPaymentsManager", function () {
                 fanA, 
                 fanA.address, 
                 transferToPlatformData,
-                firstNonce + 1
+                firstNonce.toNumber() + 1
             );
 
             // construct signed request from executor, moving tokens out of vault to purchaser 
@@ -197,18 +198,98 @@ describe("CentralPaymentsManager", function () {
         })
     })
 
-    // meta tx related failures / successes
-    // low gas
-    // wrong signer
-    // wrong nonce
+    describe("Purchase with permissioned CentralPaymentsManager", function () {
+        beforeEach(async function () {
+            // whitelist the central payments manager as an executor on the PermissionsRegistry which is what makes this approach possible
+            expect(await permissionsRegistry.addPlatformExecutor(centralPaymentsManager.address))
+                .to.emit(permissionsRegistry, "PlatformExecutorAdded")
+                .withArgs(centralPaymentsManager.address)
+        })
 
-    // when currency isn't whitelisted 
+        it("Platform executor should be able to execute a well-formed and signed purchase", async function () {
+            const saleItem = {
+                community: community.address, 
+                tokenIds: [1, 101],
+                amounts: [1, 1],
+                price: 2, // wETH
+                vault: vault.address,
+                transferData: ethers.utils.arrayify("0x")
+            }
+            const wETHWei = ethers.utils.parseUnits(saleItem.price.toString(), 18);
+            const wETHWeiToCreator = wETHWei.mul(97).div(100);
+            const wETHWeiToPlatform = wETHWei.mul(3).div(100); 
+            const firstNonce = await wethMetaTx.contract.getNonce(fanA.address);
 
-    // when caller isn't executor
+            // construct signed request from purchaser, sending 97% of price to creator
+            const transferToCreatorData = await weth.interface.encodeFunctionData("transfer", [creatorA.address, wETHWeiToCreator.toString()]);
+            const purchaseToCreatorMetaTxPacket = await wethMetaTx.signWETHMetaTxRequest(
+                fanA, 
+                fanA.address, 
+                transferToCreatorData,
+                firstNonce
+            );
 
-    // with multiple token amounts 
+            // construct signed request from purchaser, sending 3% of price to platform (vault in this case)
+            const transferToPlatformData = await weth.interface.encodeFunctionData("transfer", [vault.address, wETHWeiToPlatform.toString()]);
+            const purchaseToPlatformMetaTxPacket = await wethMetaTx.signWETHMetaTxRequest(
+                fanA, 
+                fanA.address, 
+                transferToPlatformData,
+                firstNonce.toNumber() + 1
+            );
 
-    // invalid after verification from currency! since there's no external verify function on wETH
+            // replicating contract verification - equivalent in our backend
+            const transferToCreatorMetaTx = {
+                nonce: firstNonce.toString(),
+                from: fanA.address, 
+                functionSignature: transferToCreatorData
+            }
+            const transferToPlatformMetaTx = {
+                nonce: (firstNonce + 1).toString(),
+                from: fanA.address, 
+                functionSignature: transferToPlatformData
+            }
+            expect(
+                wethMetaTx.verify(
+                    fanA.address, 
+                    transferToCreatorMetaTx, 
+                    ethers.utils.joinSignature({ r: purchaseToCreatorMetaTxPacket.sigR, s: purchaseToCreatorMetaTxPacket.sigS, v: purchaseToCreatorMetaTxPacket.sigV })
+                )
+            )
+            expect(
+                wethMetaTx.verify(
+                    fanA.address, 
+                    transferToPlatformMetaTx, 
+                    ethers.utils.joinSignature({ r: purchaseToPlatformMetaTxPacket.sigR, s: purchaseToPlatformMetaTxPacket.sigS, v: purchaseToPlatformMetaTxPacket.sigV })
+                )
+            )
+            
+            // purchase
+            const expectedPriceInWei = ethers.utils.parseUnits(saleItem.price.toString());
+            saleItem.price = expectedPriceInWei;
+            await expect(centralPaymentsManager.purchaseTokenWithMetaTxSupportedCurrencyAndPermissionedExecutor(
+                weth.address,
+                fanA.address,
+                saleItem,
+                purchaseToCreatorMetaTxPacket,
+                purchaseToPlatformMetaTxPacket
+            )).to.emit(centralPaymentsManager, "CentralSale")
+                .withArgs(
+                    ethers.utils.getAddress(community.address), 
+                    fanA.address, 
+                    weth.address, 
+                    expectedPriceInWei, 
+                    saleItem.tokenIds
+                );
+
+            // validate: 
+            expect((await weth.balanceOf(creatorA.address)).toString()).to.equal(wETHWeiToCreator.mul(2));
+            expect((await weth.balanceOf(vault.address)).toString()).to.equal(wETHWeiToPlatform.mul(2));
+            expect(await weth.balanceOf(fanA.address)).to.equal(ethers.BigNumber.from("100000000000000000000").sub(wETHWei.mul(2)));
+            expect(await community.balanceOfBatch([fanA.address, fanA.address], saleItem.tokenIds)).to.eql(saleItem.amounts.map(amount => ethers.BigNumber.from(amount)));
+            // if passed in approval for OS, OS is approved
+        })
+    })
 })
     
     
