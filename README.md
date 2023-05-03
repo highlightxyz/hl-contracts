@@ -1,3 +1,7 @@
+# Deprecated
+
+This protocol is no longer in use, see hl-evm-contracts for v1.
+
 # Environment Setup
 
 ### Install [nvm](https://github.com/nvm-sh/nvm)
